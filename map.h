@@ -9,11 +9,12 @@ enum Difficulty { EASY, NORMAL, HARD };
 struct Room {
     int id;
     std::string name;
+    std::string abbrev; // 3-4 char abbreviation for map display
     std::vector<int> neighbors;
     bool isCamera;
     bool isOffice;
     bool doorClosed;
-    int cameraGroup; // 0=A, 1=B, 2=C, -1=none
+    int cameraGroup; // 0=Upper, 1=Central, 2=Lower, -1=none
 };
 
 struct GameMap {

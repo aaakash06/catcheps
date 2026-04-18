@@ -40,6 +40,7 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     for (auto &r : gs.gameMap.rooms) {
         out << r.id << " " << r.isCamera << " " << r.isOffice
             << " " << r.doorClosed << " " << r.cameraGroup << "\n";
+        out << r.abbrev << "\n";
         out << r.name << "\n";
         out << r.neighbors.size() << "\n";
         for (int nb : r.neighbors)
@@ -87,6 +88,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
         auto &r = gs.gameMap.rooms[i];
         in >> r.id >> r.isCamera >> r.isOffice >> r.doorClosed >> r.cameraGroup;
         in.ignore();
+        std::getline(in, r.abbrev);
         std::getline(in, r.name);
 
         int nbCount;

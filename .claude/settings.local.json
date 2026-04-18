@@ -3,7 +3,10 @@
     "allow": [
       "Bash(g++ *)",
       "Bash(timeout 3 /home/aaakash06/Desktop/dev/epstine_island/camerawatch)",
-      "Bash(timeout 5 /home/aaakash06/Desktop/dev/epstine_island/camerawatch)"
+      "Bash(timeout 5 /home/aaakash06/Desktop/dev/epstine_island/camerawatch)",
+      "Bash(timeout 5 ./camerawatch)",
+      "Bash(./test_map)",
+      "Bash(timeout 3 ./camerawatch)"
     ]
   }
 }
