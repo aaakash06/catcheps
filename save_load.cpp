@@ -1,6 +1,7 @@
 #include "save_load.h"
 #include <fstream>
 #include <sstream>
+#include <vector>
 
 bool saveGame(const GameState &gs, const std::string &filename) {
     std::ofstream out(filename);
@@ -36,10 +37,11 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.gameMap.totalRooms << "\n";
     out << gs.gameMap.officeId << "\n";
     out << gs.gameMap.numCameraGroups << "\n";
+    out << gs.leftGateClosed << " " << gs.rightGateClosed << "\n";
 
     for (auto &r : gs.gameMap.rooms) {
         out << r.id << " " << r.isCamera << " " << r.isOffice
-            << " " << r.doorClosed << " " << r.cameraGroup << "\n";
+            << " " << r.cameraGroup << "\n";
         out << r.abbrev << "\n";
         out << r.name << "\n";
         out << r.neighbors.size() << "\n";
@@ -52,6 +54,11 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.probMap.size() << "\n";
     for (auto &p : gs.probMap)
         out << p.first << " " << p.second << "\n";
+
+    out << gs.activeCameraGroup << "\n";
+    out << gs.brokenCameraGroup << "\n";
+    out << gs.brokenCameraTurns << "\n";
+    out << gs.lastBrokenCameraGroup << "\n";
 
     out.close();
     return true;
@@ -81,13 +88,19 @@ bool loadGame(GameState &gs, const std::string &filename) {
     gs.gameMap.officeId = officeId;
     gs.gameMap.numCameraGroups = numGroups;
     gs.gameMap.rooms.resize(totalRooms);
+    gs.leftGateClosed = false;
+    gs.rightGateClosed = false;
 
     in.ignore(); // consume newline before room names
+    std::string headerLine;
+    std::getline(in, headerLine);
+    std::istringstream headerStream(headerLine);
+    std::vector<int> headerValues;
+    int value;
+    while (headerStream >> value)
+        headerValues.push_back(value);
 
-    for (int i = 0; i < totalRooms; i++) {
-        auto &r = gs.gameMap.rooms[i];
-        in >> r.id >> r.isCamera >> r.isOffice >> r.doorClosed >> r.cameraGroup;
-        in.ignore();
+    auto readRoomBody = [&](Room &r) {
         std::getline(in, r.abbrev);
         std::getline(in, r.name);
 
@@ -97,6 +110,29 @@ bool loadGame(GameState &gs, const std::string &filename) {
         for (int j = 0; j < nbCount; j++)
             in >> r.neighbors[j];
         in.ignore();
+    };
+
+    int startRoom = 0;
+    if (headerValues.size() == 2) {
+        gs.leftGateClosed = (headerValues[0] != 0);
+        gs.rightGateClosed = (headerValues[1] != 0);
+    } else if (headerValues.size() == 5 || headerValues.size() == 4) {
+        auto &r = gs.gameMap.rooms[0];
+        r.id = headerValues[0];
+        r.isCamera = (headerValues[1] != 0);
+        r.isOffice = (headerValues[2] != 0);
+        r.cameraGroup = headerValues.back();
+        readRoomBody(r);
+        startRoom = 1;
+    } else {
+        return false;
+    }
+
+    for (int i = startRoom; i < totalRooms; i++) {
+        auto &r = gs.gameMap.rooms[i];
+        in >> r.id >> r.isCamera >> r.isOffice >> r.cameraGroup;
+        in.ignore();
+        readRoomBody(r);
     }
 
     int probSize;
@@ -109,9 +145,26 @@ bool loadGame(GameState &gs, const std::string &filename) {
         gs.probMap[rid] = prob;
     }
 
+    gs.activeCameraGroup = (gs.gameMap.numCameraGroups > 2) ? 2 : gs.gameMap.numCameraGroups - 1;
+    gs.brokenCameraGroup = -1;
+    gs.brokenCameraTurns = 0;
+    gs.lastBrokenCameraGroup = -1;
+    std::vector<int> cameraState;
+    int cameraValue;
+    while (in >> cameraValue)
+        cameraState.push_back(cameraValue);
+    if (!cameraState.empty())
+        gs.activeCameraGroup = cameraState[0];
+    if (cameraState.size() >= 4) {
+        gs.brokenCameraGroup = cameraState[1];
+        gs.brokenCameraTurns = cameraState[2];
+        gs.lastBrokenCameraGroup = cameraState[3];
+    }
+
     gs.status = STATUS_PLAYING;
     gs.statusMessage = "";
     gs.lastCameraCheck.clear();
+    gs.lastCameraFeedUnavailable = false;
     gs.eventLog.clear();
     gs.eventLog.push_back("Game loaded successfully.");
 

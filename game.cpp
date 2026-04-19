@@ -3,12 +3,45 @@
 #include <cstdlib>
 #include <sstream>
 
+static bool isInnerRingApproachRoom(int roomId) {
+    return roomId == 3 || roomId == 4;
+}
+
+static bool isActiveCameraBroken(const GameState &gs) {
+    return gs.activeCameraGroup >= 0 &&
+           gs.brokenCameraGroup == gs.activeCameraGroup &&
+           gs.brokenCameraTurns > 0;
+}
+
+static bool canSeeEnemyLive(const GameState &gs) {
+    if (gs.activeCameraGroup < 0) return false;
+    if (isActiveCameraBroken(gs)) return false;
+    if (gs.enemy.currentRoom < 0 || gs.enemy.currentRoom >= gs.gameMap.totalRooms) return false;
+    return gs.gameMap.rooms[gs.enemy.currentRoom].cameraGroup == gs.activeCameraGroup;
+}
+
 GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(5),
     turn(0), maxTurns(30), power(100), maxPower(100),
     cameraPowerCost(3), lurePowerCost(8), doorPowerCost(5), scanPowerCost(10),
     lureCooldown(0), lureCooldownMax(2), currentLureCooldown(0),
-    lastKnownEnemyRoom(-1), lastCameraGroupChecked(-1),
+    leftGateClosed(false), rightGateClosed(false),
+    activeCameraGroup(2), brokenCameraGroup(-1), brokenCameraTurns(0), lastBrokenCameraGroup(-1),
+    lastKnownEnemyRoom(-1), lastCameraGroupChecked(-1), lastCameraFeedUnavailable(false),
     status(STATUS_PLAYING) {}
+
+bool isBlockedEdge(const GameState& gs, int from, int to) {
+    const int MB = gs.gameMap.officeId;
+    const int KAD = 3;
+    const int KNOW = 4;
+
+    if ((from == MB && to == KNOW) || (from == KNOW && to == MB))
+        return gs.leftGateClosed;
+
+    if ((from == MB && to == KAD) || (from == KAD && to == MB))
+        return gs.rightGateClosed;
+
+    return false;
+}
 
 void setDifficultyParams(GameState &gs, Difficulty diff) {
     gs.difficulty = diff;
@@ -63,14 +96,17 @@ void GameState::newNight() {
     turn = 0;
     int spawn = findSpawnRoom(gameMap);
     enemy.init(spawn, difficulty);
+    activeCameraGroup = (gameMap.numCameraGroups > 2) ? 2 : gameMap.numCameraGroups - 1;
+    brokenCameraGroup = -1;
+    brokenCameraTurns = 0;
+    lastBrokenCameraGroup = -1;
     lastKnownEnemyRoom = -1;
     lastCameraCheck.clear();
     lastCameraGroupChecked = -1;
+    lastCameraFeedUnavailable = false;
     currentLureCooldown = 0;
-
-    // Reset doors
-    for (auto &r : gameMap.rooms)
-        r.doorClosed = false;
+    leftGateClosed = false;
+    rightGateClosed = false;
 
     // Reset probability
     probMap.clear();
@@ -90,15 +126,18 @@ void GameState::doTurn(int action, int param) {
     turn++;
     eventLog.clear();
     lastCameraCheck.clear();
+    lastCameraFeedUnavailable = false;
+    bool drainPowerThisTurn = true;
 
     switch (action) {
         case 1: checkCamera(param); break;
         case 2: playLure(param); break;
-        case 3: closeDoor(param); break;
-        case 4: restoreDoor(param); break;
+        case 3: toggleGate(param); break;
+        case 4: openGate(param); break;
         case 5: riskScan(); break;
         case 6: // end turn, no action
             eventLog.push_back("You wait...");
+            drainPowerThisTurn = false;
             break;
         default:
             eventLog.push_back("Invalid action.");
@@ -114,16 +153,41 @@ void GameState::doTurn(int action, int param) {
     // Enemy moves
     enemyTurn();
 
-    // Passive power drain
-    int drain = 1 + currentNight / 2;
-    power -= drain;
-    if (power < 0) power = 0;
+    if (canSeeEnemyLive(*this))
+        lastKnownEnemyRoom = enemy.currentRoom;
 
-    // Door upkeep
-    for (auto &r : gameMap.rooms) {
-        if (r.doorClosed) {
-            power -= 1;
-            if (power < 0) power = 0;
+    bool outageRestoredThisTurn = false;
+    if (brokenCameraTurns > 0) {
+        brokenCameraTurns--;
+        if (brokenCameraTurns == 0) {
+            eventLog.push_back(cameraGroupLabel(brokenCameraGroup) + " cameras restored.");
+            brokenCameraGroup = -1;
+            outageRestoredThisTurn = true;
+        }
+    }
+
+    if (drainPowerThisTurn) {
+        // Passive power drain
+        int drain = 1 + currentNight / 2;
+        power -= drain;
+        if (power < 0) power = 0;
+
+        if (leftGateClosed) power -= 1;
+        if (rightGateClosed) power -= 1;
+        if (power < 0) power = 0;
+    }
+
+    if (difficulty == EASY && activeCameraGroup >= 0 && brokenCameraTurns == 0 &&
+        !outageRestoredThisTurn && turn > 2) {
+        bool canBreakActiveRing = true;
+        if (activeCameraGroup == 0 && isInnerRingApproachRoom(enemy.currentRoom))
+            canBreakActiveRing = false;
+
+        if (canBreakActiveRing && (std::rand() % 100) < 10) {
+            brokenCameraGroup = activeCameraGroup;
+            brokenCameraTurns = 1;
+            lastBrokenCameraGroup = activeCameraGroup;
+            eventLog.push_back("Warning: " + cameraGroupLabel(activeCameraGroup) + " cameras offline!");
         }
     }
 
@@ -133,10 +197,14 @@ void GameState::doTurn(int action, int param) {
 
 void GameState::enemyTurn() {
     enemy.tickLure();
-    enemy.move(gameMap);
+    enemy.move(*this);
 
     std::stringstream ss;
-    ss << "Turn " << turn << ": Enemy moved.";
+    ss << "Turn " << turn << ": Enemy ";
+    if (enemy.currentRoom == enemy.lastRoom)
+        ss << "waited.";
+    else
+        ss << "moved.";
     eventLog.push_back(ss.str());
 }
 
@@ -170,7 +238,19 @@ void GameState::checkCamera(int group) {
         return;
     }
     power -= cameraPowerCost;
+    activeCameraGroup = group;
     lastCameraGroupChecked = group;
+    eventLog.push_back("Now watching: " + cameraGroupLabel(group));
+
+    if (isActiveCameraBroken(*this)) {
+        lastCameraFeedUnavailable = true;
+        eventLog.push_back(cameraGroupLabel(group) + " camera feed unavailable.");
+
+        std::stringstream ss;
+        ss << "Checked Camera " << cameraGroupLabel(group) << " (-" << cameraPowerCost << " power)";
+        eventLog.push_back(ss.str());
+        return;
+    }
 
     auto roomIds = roomsInGroup(gameMap, group);
     for (int rid : roomIds) {
@@ -231,47 +311,71 @@ void GameState::playLure(int group) {
     eventLog.push_back("Enemy is now investigating the sound!");
 }
 
-void GameState::closeDoor(int roomId) {
+void GameState::toggleGate(int roomId) {
     if (roomId < 0 || roomId >= gameMap.totalRooms) {
         eventLog.push_back("Invalid room!");
         turn--;
         return;
     }
-    if (gameMap.rooms[roomId].isOffice) {
-        eventLog.push_back("Cannot close the office door!");
+
+    bool *gate = nullptr;
+    std::string gateLabel;
+    if (roomId == 3) {
+        gate = &rightGateClosed;
+        gateLabel = "KAD office gate";
+    } else if (roomId == 4) {
+        gate = &leftGateClosed;
+        gateLabel = "KNOW office gate";
+    } else {
+        eventLog.push_back("Only office entrance gates can be controlled.");
         turn--;
         return;
     }
-    if (gameMap.rooms[roomId].doorClosed) {
-        eventLog.push_back("Door already closed!");
-        turn--;
-        return;
-    }
-    if (power < doorPowerCost) {
+
+    if (!*gate && power < doorPowerCost) {
         eventLog.push_back("Not enough power!");
         turn--;
         return;
     }
-    power -= doorPowerCost;
-    gameMap.rooms[roomId].doorClosed = true;
+
+    if (!*gate) power -= doorPowerCost;
+    *gate = !*gate;
+
     std::stringstream ss;
-    ss << "Closed door at " << gameMap.rooms[roomId].name << " (-" << doorPowerCost << " power)";
+    ss << gateLabel << ' ' << (*gate ? "closed" : "opened");
+    if (*gate) ss << " (-" << doorPowerCost << " power)";
     eventLog.push_back(ss.str());
 }
 
-void GameState::restoreDoor(int roomId) {
+void GameState::openGate(int roomId) {
     if (roomId < 0 || roomId >= gameMap.totalRooms) {
         eventLog.push_back("Invalid room!");
         turn--;
         return;
     }
-    if (!gameMap.rooms[roomId].doorClosed) {
-        eventLog.push_back("Door is already open!");
+
+    bool *gate = nullptr;
+    std::string gateLabel;
+    if (roomId == 3) {
+        gate = &rightGateClosed;
+        gateLabel = "KAD office gate";
+    } else if (roomId == 4) {
+        gate = &leftGateClosed;
+        gateLabel = "KNOW office gate";
+    } else {
+        eventLog.push_back("Only office entrance gates can be controlled.");
         turn--;
         return;
     }
-    gameMap.rooms[roomId].doorClosed = false;
-    eventLog.push_back("Restored door at " + gameMap.rooms[roomId].name);
+
+    if (!*gate) {
+        eventLog.push_back(gateLabel + " is already open.");
+        turn--;
+        return;
+    }
+
+    *gate = false;
+    eventLog.push_back(gateLabel + " opened.");
 }
 
 void GameState::riskScan() {
@@ -283,7 +387,8 @@ void GameState::riskScan() {
     power -= scanPowerCost;
     eventLog.push_back("=== RISK ANALYSIS ===");
 
-    auto aps = findArticulationPoints(gameMap.rooms);
+    auto aps = findArticulationPoints(gameMap.rooms, gameMap.officeId,
+                                      leftGateClosed, rightGateClosed);
     if (!aps.empty()) {
         eventLog.push_back("Critical rooms (articulation points):");
         for (int ap : aps)
@@ -292,7 +397,8 @@ void GameState::riskScan() {
         eventLog.push_back("No critical chokepoints detected.");
     }
 
-    auto brs = findBridges(gameMap.rooms);
+    auto brs = findBridges(gameMap.rooms, gameMap.officeId,
+                           leftGateClosed, rightGateClosed);
     if (!brs.empty()) {
         eventLog.push_back("Critical corridors (bridges):");
         for (auto &b : brs)
@@ -300,7 +406,8 @@ void GameState::riskScan() {
                 " <-> " + gameMap.rooms[b.second].name);
     }
 
-    auto path = bfsShortestPath(gameMap.rooms, enemy.currentRoom, gameMap.officeId);
+    auto path = bfsShortestPath(gameMap.rooms, enemy.currentRoom, gameMap.officeId,
+                                gameMap.officeId, leftGateClosed, rightGateClosed);
     if (!path.empty()) {
         std::stringstream ss;
         ss << "Shortest path from last known to office: " << path.size() - 1 << " steps";
@@ -308,7 +415,8 @@ void GameState::riskScan() {
     }
 
     auto danger = computeDangerLevels(gameMap.rooms, gameMap.officeId,
-                                       lastKnownEnemyRoom, probMap);
+                                      lastKnownEnemyRoom, probMap,
+                                      leftGateClosed, rightGateClosed);
     eventLog.push_back("Danger levels:");
     for (auto &p : danger) {
         std::string level;
@@ -336,9 +444,10 @@ void GameState::updateProbMap() {
         auto &neighbors = gameMap.rooms[lastKnownEnemyRoom].neighbors;
         double spread = 0.5 / (neighbors.size() + 1);
         for (int nb : neighbors)
-            if (!gameMap.rooms[lastKnownEnemyRoom].doorClosed)
+            if (!isBlockedEdge(*this, lastKnownEnemyRoom, nb))
                 probMap[nb] += spread;
         probMap[lastKnownEnemyRoom] += spread;
     }
-    diffuseProbability(gameMap.rooms, probMap);
+    diffuseProbability(gameMap.rooms, probMap, gameMap.officeId,
+                       leftGateClosed, rightGateClosed);
 }

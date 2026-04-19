@@ -45,44 +45,59 @@ GameMap buildMap(Difficulty diff) {
         gm.rooms[i].abbrev = allBuildings[i].abbrev;
         gm.rooms[i].name = allBuildings[i].name;
         gm.rooms[i].isOffice = allBuildings[i].isOffice;
-        gm.rooms[i].doorClosed = false;
         gm.rooms[i].isCamera = true;
     }
 
     // Camera groups:
-    // 0=Upper: MW(8), RM(9), RHS(10), RR(11), JL(12)
-    // 1=Central: HC(6), HW(7), CYM(5)
-    // 2=Lower: LIB(2), KKL(1), KAD(3), KNOW(4), MB(0)
-    int groups13[] = {2, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0};
+    // 0=Inner Ring: KAD(3), KNOW(4)
+    // 1=Middle Ring: LIB(2), HC(6)
+    // 2=Outer Ring: KKL(1), CYM(5), HW(7), MW(8), RM(9), RHS(10), RR(11), JL(12)
+    // MB(0) is excluded from camera groups.
+    int groups13[] = {-1, 2, 1, 0, 0, 2, 1, 2, 2, 2, 2, 2, 2};
     for (int i = 0; i < n; i++)
         gm.rooms[i].cameraGroup = groups13[i];
 
-    // Edges — built incrementally so subsets remain connected
-
-    // Core edges (always present, rooms 0-7 for EASY)
-    addEdge(gm, 0, 3);  // MB -- KAD
-    addEdge(gm, 0, 4);  // MB -- KNOW
-    addEdge(gm, 3, 2);  // KAD -- LIB
-    addEdge(gm, 3, 6);  // KAD -- HC
-    addEdge(gm, 2, 1);  // LIB -- KKL
-    addEdge(gm, 2, 4);  // LIB -- KNOW
-    addEdge(gm, 2, 6);  // LIB -- HC
-    addEdge(gm, 6, 5);  // HC -- CYM
-    addEdge(gm, 6, 7);  // HC -- HW
-    addEdge(gm, 1, 5);  // KKL -- CYM
-
-    if (n >= 10) {
-        // NORMAL+: add MW(8), RM(9) connections
+    if (diff == EASY) {
+        addEdge(gm, 0, 3);  // MB -- KAD
+        addEdge(gm, 0, 4);  // MB -- KNOW
+        addEdge(gm, 3, 6);  // KAD -- HC
+        addEdge(gm, 6, 5);  // HC -- CYM
+        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 7, 5);  // HW -- CYM
+        addEdge(gm, 2, 4);  // LIB -- KNOW
+        addEdge(gm, 2, 1);  // LIB -- KKL
+        addEdge(gm, 2, 6);  // LIB -- HC
+    } else if (diff == NORMAL) {
+        addEdge(gm, 0, 3);  // MB -- KAD
+        addEdge(gm, 0, 4);  // MB -- KNOW
+        addEdge(gm, 3, 6);  // KAD -- HC
+        addEdge(gm, 6, 5);  // HC -- CYM
+        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 7, 5);  // HW -- CYM
+        addEdge(gm, 2, 4);  // LIB -- KNOW
+        addEdge(gm, 2, 1);  // LIB -- KKL
+        addEdge(gm, 2, 6);  // LIB -- HC
+        addEdge(gm, 2, 9);  // LIB -- RM
         addEdge(gm, 7, 8);  // HW -- MW
-        addEdge(gm, 8, 9);  // MW -- RM
-        addEdge(gm, 6, 9);  // HC -- RM
-    }
-
-    if (n >= 13) {
-        // HARD: add RHS(10), RR(11), JL(12)
-        addEdge(gm, 9, 10);  // RM -- RHS
-        addEdge(gm, 10, 11); // RHS -- RR
-        addEdge(gm, 11, 12); // RR -- JL
+        addEdge(gm, 5, 9);  // CYM -- RM
+    } else {
+        addEdge(gm, 8, 10);  // MW -- RHS
+        addEdge(gm, 10, 12); // RHS -- JL
+        addEdge(gm, 8, 7);   // MW -- HW
+        addEdge(gm, 10, 5);  // RHS -- CYM
+        addEdge(gm, 12, 11); // JL -- RR
+        addEdge(gm, 7, 5);   // HW -- CYM
+        addEdge(gm, 5, 11);  // CYM -- RR
+        addEdge(gm, 7, 6);   // HW -- HC
+        addEdge(gm, 5, 2);   // CYM -- LIB
+        addEdge(gm, 3, 6);   // KAD -- HC
+        addEdge(gm, 6, 2);   // HC -- LIB
+        addEdge(gm, 2, 1);   // LIB -- KKL
+        addEdge(gm, 6, 4);   // HC -- KNOW
+        addEdge(gm, 2, 9);   // LIB -- RM
+        addEdge(gm, 4, 9);   // KNOW -- RM
+        addEdge(gm, 0, 3);   // MB -- KAD
+        addEdge(gm, 0, 4);   // MB -- KNOW
     }
 
     return gm;
@@ -90,16 +105,15 @@ GameMap buildMap(Difficulty diff) {
 
 std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown) {
     if (r.isOffice) return "[SAFE]";
-    if (r.doorClosed) return "[X]";
     if (r.id == enemyRoom) return "[!]";
     if (r.id == lastKnown) return "[?]";
     return "[ ]";
 }
 
 std::string cameraGroupLabel(int group) {
-    if (group == 0) return "Upper";
-    if (group == 1) return "Central";
-    if (group == 2) return "Lower";
+    if (group == 0) return "Inner Ring";
+    if (group == 1) return "Middle Ring";
+    if (group == 2) return "Outer Ring";
     return "?";
 }
 

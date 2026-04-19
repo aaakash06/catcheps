@@ -8,27 +8,44 @@
 struct Room;
 
 // BFS shortest path from src to dst. Returns path as room IDs, empty if unreachable.
-std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst);
+std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst,
+                                 int officeId = 0,
+                                 bool leftGateClosed = false,
+                                 bool rightGateClosed = false);
 
 // BFS distance from src to every other room. Returns map of room->distance.
-std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src);
+std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
+                                int officeId = 0,
+                                bool leftGateClosed = false,
+                                bool rightGateClosed = false);
 
 // Find articulation points in the graph. Returns room IDs that are articulation points.
-std::vector<int> findArticulationPoints(const std::vector<Room> &rooms);
+std::vector<int> findArticulationPoints(const std::vector<Room> &rooms,
+                                        int officeId = 0,
+                                        bool leftGateClosed = false,
+                                        bool rightGateClosed = false);
 
 // Find bridges in the graph. Returns pairs of (u, v) edges that are bridges.
-std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms);
+std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
+                                             int officeId = 0,
+                                             bool leftGateClosed = false,
+                                             bool rightGateClosed = false);
 
 // Diffuse a probability distribution over the graph for one step.
 // probMap: room->probability (should sum to ~1.0).
 // Updates probMap in-place based on adjacency and door states.
-void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap);
+void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap,
+                        int officeId = 0,
+                        bool leftGateClosed = false,
+                        bool rightGateClosed = false);
 
 // Compute danger level for each room based on distance to office and enemy proximity.
 // Returns map of room->danger (0.0 to 1.0).
 std::map<int, double> computeDangerLevels(const std::vector<Room> &rooms,
                                            int officeId,
                                            int enemyLastKnown,
-                                           const std::map<int, double> &probMap);
+                                           const std::map<int, double> &probMap,
+                                           bool leftGateClosed = false,
+                                           bool rightGateClosed = false);
 
 #endif

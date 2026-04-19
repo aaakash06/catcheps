@@ -13,7 +13,6 @@ struct Room {
     std::vector<int> neighbors;
     bool isCamera;
     bool isOffice;
-    bool doorClosed;
     int cameraGroup; // 0=Upper, 1=Central, 2=Lower, -1=none
 };
 

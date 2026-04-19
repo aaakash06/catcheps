@@ -13,7 +13,7 @@
 
 static int selectCameraGroup(GameState &gs) {
     // Show groups and wait for key selection
-    std::cout << "\n  Select camera group:\n";
+    std::cout << "\n  Select camera ring:\n";
     for (int i = 0; i < gs.gameMap.numCameraGroups; i++) {
         auto roomIds = roomsInGroup(gs.gameMap, i);
         std::cout << "  " << CLR_CYAN << "[" << (i+1) << "]" << CLR_RESET
@@ -29,9 +29,9 @@ static int selectCameraGroup(GameState &gs) {
 
     while (true) {
         Key k = getKey();
-        if (k == KEY_1) return 0;
-        if (k == KEY_2) return 1;
-        if (k == KEY_3) return 2;
+        if (k == KEY_1 && gs.gameMap.numCameraGroups >= 1) return 0;
+        if (k == KEY_2 && gs.gameMap.numCameraGroups >= 2) return 1;
+        if (k == KEY_3 && gs.gameMap.numCameraGroups >= 3) return 2;
         if (k == KEY_0 || k == KEY_ESCAPE) return -1;
     }
 }
