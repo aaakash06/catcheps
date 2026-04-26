@@ -56,9 +56,8 @@ struct GameState {
     void checkConditions();
     void quickSweep(int group);
     void deepScan(int roomId);
-    void playLure(int group);
+    void playLure(int roomId);
     void toggleGate(int roomId);
-    void toggleBothGates();
     void updateProbMap();
 };
 

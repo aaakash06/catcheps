@@ -9,7 +9,7 @@
 void clearScreen();
 
 // Draw the full game HUD with spatial map.
-void drawGame(const GameState &gs);
+void drawGame(const GameState &gs, int cursorRoom);
 
 // Draw the main menu.
 void drawMainMenu();
@@ -18,7 +18,7 @@ void drawMainMenu();
 void drawDifficultyMenu();
 
 // Draw the spatial ASCII map.
-void drawMap(const GameState &gs);
+void drawMap(const GameState &gs, int cursorRoom);
 
 // Draw camera check results.
 void drawCameraFeed(const GameState &gs);
@@ -34,5 +34,8 @@ void pause(const std::string &msg);
 
 // Show help screen.
 void drawHelp();
+
+// Get next room for cursor navigation (following neighbor order).
+int getNextRoomNav(const GameState &gs, int currentCursor, int direction);
 
 #endif

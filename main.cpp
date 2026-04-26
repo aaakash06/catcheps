@@ -38,7 +38,7 @@ static int promptNumberedMenu(const std::string &title,
     }
 }
 
-static int selectCameraGroup(GameState &gs) {
+static int selectCameraGroup(GameState &gs, int cursorRoom) {
     std::vector<std::string> options;
     for (int i = 0; i < gs.gameMap.numCameraGroups; i++) {
         auto roomIds = roomsInGroup(gs.gameMap, i);
@@ -48,60 +48,54 @@ static int selectCameraGroup(GameState &gs) {
             option += gs.gameMap.rooms[roomIds[j]].abbrev;
         }
         option += ")";
+        if (roomInCameraGroup(gs.gameMap, cursorRoom, i))
+            option += " <- cursor location";
         options.push_back(option);
     }
     return promptNumberedMenu("  Select camera cluster:", options);
 }
 
-static int selectDeepScanRoom(GameState &gs) {
-    std::vector<int> roomIds;
-    std::vector<std::string> options;
-
-    for (int roomId = 0; roomId < gs.gameMap.totalRooms; roomId++) {
-        if (roomId == gs.gameMap.officeId)
-            continue;
-        roomIds.push_back(roomId);
-        options.push_back(gs.gameMap.rooms[roomId].abbrev + " - " + gs.gameMap.rooms[roomId].name);
-    }
-
-    int choice = promptNumberedMenu("  Select building for Deep Scan:", options);
-    if (choice < 0)
-        return -1;
-    return roomIds[choice];
-}
-
 static void runGameLoop(GameState &gs) {
+    int cursorRoom = gs.gameMap.officeId;
+
     while (gs.status == STATUS_PLAYING) {
-        drawGame(gs);
+        drawGame(gs, cursorRoom);
 
         Key k = getKey();
+
+        if (k == KEY_UP) {
+            cursorRoom = getNextRoomNav(gs, cursorRoom, 0);
+            continue;
+        }
+        if (k == KEY_DOWN) {
+            cursorRoom = getNextRoomNav(gs, cursorRoom, 1);
+            continue;
+        }
+        if (k == KEY_LEFT) {
+            cursorRoom = getNextRoomNav(gs, cursorRoom, 2);
+            continue;
+        }
+        if (k == KEY_RIGHT) {
+            cursorRoom = getNextRoomNav(gs, cursorRoom, 3);
+            continue;
+        }
 
         // Actions
         if (k == KEY_A) {
             // Quick Sweep
-            int group = selectCameraGroup(gs);
+            int group = selectCameraGroup(gs, cursorRoom);
             if (group >= 0)
                 gs.doTurn(1, group);
-        } else if (k == KEY_S) {
-            // Deep Scan one building from a numbered menu
-            int roomId = selectDeepScanRoom(gs);
-            if (roomId >= 0)
-                gs.doTurn(2, roomId);
-        } else if (k == KEY_Z) {
-            // Toggle KNOW gate
-            gs.doTurn(3, 4);
-        } else if (k == KEY_X) {
-            // Toggle KAD gate
-            gs.doTurn(3, 3);
-        } else if (k == KEY_C) {
-            // Toggle both office gates
-            gs.doTurn(8, -1);
+        } else if (k == KEY_ENTER) {
+            // Deep Scan selected building
+            gs.doTurn(2, cursorRoom);
+        } else if (k == KEY_G) {
+            // Toggle selected gate if present
+            gs.doTurn(3, cursorRoom);
         } else if (k == KEY_L) {
-            // Lure
-            int group = selectCameraGroup(gs);
-            if (group >= 0)
-                gs.doTurn(4, group);
-        } else if (k == KEY_W) {
+            // Lure at selected building
+            gs.doTurn(4, cursorRoom);
+        } else if (k == KEY_W || k == KEY_SPACE) {
             // End turn (wait / listen)
             gs.doTurn(5, -1);
         } else if (k == KEY_Q) {

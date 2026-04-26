@@ -255,7 +255,6 @@ void GameState::doTurn(int action, int param) {
         case 1: quickSweep(param); break;
         case 2: deepScan(param); break;
         case 3: toggleGate(param); break;
-        case 8: toggleBothGates(); break;
         case 4: playLure(param); break;
         case 5:
             eventLog.push_back("You wait and listen...");
@@ -379,10 +378,10 @@ void GameState::deepScan(int roomId) {
     }
 }
 
-// Plays a sound lure in one camera cluster to bias the enemy toward a random room there.
-void GameState::playLure(int group) {
-    if (group < 0 || group >= gameMap.numCameraGroups) {
-        eventLog.push_back("Invalid lure target cluster.");
+// Places a sound lure at one exact building chosen by the cursor.
+void GameState::playLure(int roomId) {
+    if (roomId < 0 || roomId >= gameMap.totalRooms || roomId == gameMap.officeId) {
+        eventLog.push_back("You can only place a lure at a non-office building.");
         turn--;
         return;
     }
@@ -399,22 +398,14 @@ void GameState::playLure(int group) {
         return;
     }
 
-    auto roomIds = roomsInGroup(gameMap, group);
-    if (roomIds.empty()) {
-        eventLog.push_back("That cluster has no valid lure target.");
-        turn--;
-        return;
-    }
-
     power -= lurePowerCost;
     currentLureCooldown = lureCooldownMax;
 
-    int target = roomIds[std::rand() % roomIds.size()];
     int duration = (difficulty == EASY) ? 4 : (difficulty == NORMAL) ? 3 : 2;
-    enemy.applyLure(target, duration);
+    enemy.applyLure(roomId, duration);
 
     std::stringstream ss;
-    ss << "Lure used in " << cameraGroupLabel(gameMap, group)
+    ss << "Lure placed at " << gameMap.rooms[roomId].name
        << " (-" << lurePowerCost << "% energy)";
     eventLog.push_back(ss.str());
 }
@@ -436,43 +427,26 @@ void GameState::toggleGate(int roomId) {
         gate = &leftGateClosed;
         gateLabel = "KNOW office gate";
     } else {
-        eventLog.push_back("Only KAD and KNOW can be defended directly.");
+        eventLog.push_back("No gate installed at this location.");
         turn--;
         return;
     }
 
-    *gate = !*gate;
-    eventLog.push_back(gateLabel + (*gate ? " closed." : " opened."));
-}
-
-// Forces both office gates closed in one turn, charging only for gates that were open.
-void GameState::toggleBothGates() {
-    bool closeKnow = !leftGateClosed;
-    bool closeKad = !rightGateClosed;
-
-    if (!closeKnow && !closeKad) {
-        eventLog.push_back("Both gates are already closed.");
-        turn--;
-        return;
+    if (!*gate) {
+        if (power < doorPowerCost) {
+            eventLog.push_back("Not enough energy to close this gate.");
+            turn--;
+            return;
+        }
+        power -= doorPowerCost;
+        *gate = true;
+        std::stringstream ss;
+        ss << gateLabel << " closed (-" << doorPowerCost << "% energy).";
+        eventLog.push_back(ss.str());
+    } else {
+        *gate = false;
+        eventLog.push_back(gateLabel + " opened.");
     }
-
-    int cost = 0;
-    if (closeKnow) cost += doorPowerCost;
-    if (closeKad) cost += doorPowerCost;
-
-    if (power < cost) {
-        eventLog.push_back("Not enough energy to close both gates.");
-        turn--;
-        return;
-    }
-
-    power -= cost;
-    leftGateClosed = true;
-    rightGateClosed = true;
-
-    std::stringstream ss;
-    ss << "Both office gates closed (-" << cost << "% energy).";
-    eventLog.push_back(ss.str());
 }
 
 // Rebuilds the coarse enemy probability map from the last reliable signal and

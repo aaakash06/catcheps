@@ -16,12 +16,11 @@ g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp
 Run the executable from the repository root so the ASCII templates in `maps/` can be loaded correctly.
 
 ## Controls
+- `Arrow Keys`: move the cursor between connected buildings
+- `Enter`: Deep Scan the selected building
+- `G`: toggle the gate at the selected building (`KNOW` / `KAD` only)
 - `A`: Quick Sweep a camera cluster
-- `S`: Deep Scan a building from a numbered menu
-- `Z`: close the `KNOW` office gate
-- `X`: close the `KAD` office gate
-- `C`: close both office gates
-- `L`: use a lure in a camera cluster
+- `L`: place a lure at the selected building
 - `W`: wait / listen
 - `Q`: save and quit
 - `H`: help
@@ -38,8 +37,8 @@ After the turn ends, the scan is gone. If the player wants updated information o
 This creates survival-horror tension because the player must keep deciding between:
 - broad but cheap information
 - precise but expensive confirmation
-- defense
-- lure usage
+- cursor-based gate defense
+- cursor-based lure placement
 - waiting and relying on audio
 
 ## Quick Sweep vs Deep Scan
@@ -55,13 +54,20 @@ Example:
 
 ### Deep Scan
 - Checks one exact building
-- Uses a numbered building menu
+- Uses the current cursor location
 - Costs more energy
 - Reveals the exact room if the enemy is there
 
 Example:
 - `DEEP SCAN - LIB`
 - `Enemy detected at LIB.`
+
+## Gate Control
+- Gates are controlled with the cursor and `G`
+- `KNOW` and `KAD` are the only gate nodes
+- Closing a gate costs energy
+- Opening a gate costs `0` energy but still uses the turn
+- There is no command to close both gates at once
 
 ## Energy Cost by Difficulty
 ### Easy
