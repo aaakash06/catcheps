@@ -26,9 +26,6 @@ struct GameMap {
 // Build a map for the given difficulty.
 GameMap buildMap(Difficulty diff);
 
-// Get room name for display.
-std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown);
-
 // Get camera group label.
 std::string cameraGroupLabel(const GameMap &map, int group);
 

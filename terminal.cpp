@@ -48,6 +48,8 @@ Key getKey() {
     if (c == 'e' || c == 'E') return KEY_E;
     if (c == 'q' || c == 'Q') return KEY_Q;
     if (c == 'h' || c == 'H') return KEY_H;
+    if (c == 'z' || c == 'Z') return KEY_Z;
+    if (c == 'x' || c == 'X') return KEY_X;
     if (c == '0') return KEY_0;
     if (c == '1') return KEY_1;
     if (c == '2') return KEY_2;

@@ -12,6 +12,20 @@ static std::string toLowerCopy(const std::string &text) {
     return lowered;
 }
 
+static int primaryClusterForRoom(const GameMap &map, int roomId);
+
+static std::string initialEnemyLog(const GameState &gs, int roomId) {
+    const std::string roomCode = gs.gameMap.rooms[roomId].abbrev;
+    const int group = primaryClusterForRoom(gs.gameMap, roomId);
+    const std::string groupLabel = (group >= 0) ? cameraGroupLabel(gs.gameMap, group) : "Outer Campus";
+
+    if (gs.difficulty == EASY)
+        return "Enemy detected at " + roomCode + ".";
+    if (gs.difficulty == NORMAL)
+        return "Movement detected near the " + groupLabel + ": " + roomCode + " area.";
+    return groupLabel + " sensor triggered. Source unknown.";
+}
+
 static int primaryClusterForRoom(const GameMap &map, int roomId) {
     for (int group = 0; group < map.numCameraGroups; group++) {
         if (roomInCameraGroup(map, roomId, group))
@@ -91,7 +105,6 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.deepScanPowerCost = 3;
         gs.lurePowerCost = 3;
         gs.doorPowerCost = 1;
-        gs.scanPowerCost = 5;
         gs.signalDecayTurns = 3;
         gs.audioProbDistance3 = 25;
         gs.audioProbDistance2 = 40;
@@ -107,7 +120,6 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.deepScanPowerCost = 5;
         gs.lurePowerCost = 4;
         gs.doorPowerCost = 1;
-        gs.scanPowerCost = 7;
         gs.signalDecayTurns = 2;
         gs.audioProbDistance3 = 20;
         gs.audioProbDistance2 = 35;
@@ -123,7 +135,6 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.deepScanPowerCost = 6;
         gs.lurePowerCost = 5;
         gs.doorPowerCost = 2;
-        gs.scanPowerCost = 9;
         gs.signalDecayTurns = 1;
         gs.audioProbDistance3 = 10;
         gs.audioProbDistance2 = 25;
@@ -149,7 +160,7 @@ SignalStrength getSignalStrength(const GameState &gs) {
 std::string getSignalDisplay(const GameState &gs) {
     SignalStrength strength = getSignalStrength(gs);
     if (strength == SIGNAL_NONE)
-        return "No reliable signal.";
+        return "Unknown";
 
     std::stringstream ss;
     ss << gs.gameMap.rooms[gs.lastKnownEnemyRoom].abbrev << " "
@@ -159,7 +170,7 @@ std::string getSignalDisplay(const GameState &gs) {
 
 GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(3),
     turn(0), maxTurns(30), power(100), maxPower(100),
-    cameraPowerCost(1), deepScanPowerCost(3), lurePowerCost(3), doorPowerCost(1), scanPowerCost(5),
+    cameraPowerCost(1), deepScanPowerCost(3), lurePowerCost(3), doorPowerCost(1),
     signalDecayTurns(3), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
     moveCloserProb(55), moveSidewaysProb(30), moveRandomProb(15),
     lureCooldownMax(2), currentLureCooldown(0),
@@ -188,26 +199,50 @@ void GameState::newNight(bool preserveEventLog) {
     turn = 0;
     int spawn = findSpawnRoom(gameMap);
     enemy.init(spawn, difficulty);
-    lastKnownEnemyRoom = -1;
-    lastKnownEnemyTurn = -9999;
+    if (difficulty == HARD) {
+        lastKnownEnemyRoom = -1;
+        lastKnownEnemyTurn = -9999;
+    } else {
+        lastKnownEnemyRoom = spawn;
+        lastKnownEnemyTurn = 0;
+    }
     lastScanOutput.clear();
     currentLureCooldown = 0;
     leftGateClosed = false;
     rightGateClosed = false;
 
     probMap.clear();
-    for (size_t i = 0; i < gameMap.rooms.size(); i++)
-        probMap[(int)i] = 1.0 / gameMap.totalRooms;
+    if (difficulty == HARD) {
+        int startGroup = primaryClusterForRoom(gameMap, spawn);
+        std::vector<int> startRooms = roomsInGroup(gameMap, startGroup);
+        if (startRooms.empty()) {
+            for (size_t i = 0; i < gameMap.rooms.size(); i++)
+                probMap[(int)i] = 1.0 / gameMap.totalRooms;
+        } else {
+            double share = 1.0 / startRooms.size();
+            for (size_t i = 0; i < gameMap.rooms.size(); i++)
+                probMap[(int)i] = 0.0;
+            for (size_t i = 0; i < startRooms.size(); i++)
+                probMap[startRooms[i]] = share;
+        }
+    } else {
+        for (size_t i = 0; i < gameMap.rooms.size(); i++)
+            probMap[(int)i] = 0.0;
+        probMap[spawn] = 1.0;
+    }
 
     std::stringstream ss;
     ss << "--- Night " << currentNight << " begins ---";
     eventLog.push_back(ss.str());
+    eventLog.push_back("SECURITY LOG -- 11:55 PM");
+    eventLog.push_back(initialEnemyLog(*this, spawn));
+    eventLog.push_back("The intruder appears to have entered from the outer campus.");
     status = STATUS_PLAYING;
     statusMessage = "";
 }
 
 // Processes one player action, then resolves enemy movement, audio hints,
-// resource upkeep, win/loss checks, and probability updates for that turn.
+// closed-gate upkeep on active turns, win/loss checks, and probability updates.
 void GameState::doTurn(int action, int param) {
     if (status != STATUS_PLAYING) return;
 
@@ -220,13 +255,12 @@ void GameState::doTurn(int action, int param) {
         case 1: quickSweep(param); break;
         case 2: deepScan(param); break;
         case 3: toggleGate(param); break;
+        case 8: toggleBothGates(); break;
         case 4: playLure(param); break;
         case 5:
             eventLog.push_back("You wait and listen...");
             drainPowerThisTurn = false;
             break;
-        case 6: openGate(param); break;
-        case 7: riskScan(); break;
         default:
             eventLog.push_back("Invalid action.");
             turn--;
@@ -411,93 +445,33 @@ void GameState::toggleGate(int roomId) {
     eventLog.push_back(gateLabel + (*gate ? " closed." : " opened."));
 }
 
-// Opens one office gate explicitly without spending energy.
-void GameState::openGate(int roomId) {
-    if (roomId < 0 || roomId >= gameMap.totalRooms) {
-        eventLog.push_back("Invalid room.");
+// Forces both office gates closed in one turn, charging only for gates that were open.
+void GameState::toggleBothGates() {
+    bool closeKnow = !leftGateClosed;
+    bool closeKad = !rightGateClosed;
+
+    if (!closeKnow && !closeKad) {
+        eventLog.push_back("Both gates are already closed.");
         turn--;
         return;
     }
 
-    bool *gate = nullptr;
-    std::string gateLabel;
-    if (roomId == 3) {
-        gate = &rightGateClosed;
-        gateLabel = "KAD office gate";
-    } else if (roomId == 4) {
-        gate = &leftGateClosed;
-        gateLabel = "KNOW office gate";
-    } else {
-        eventLog.push_back("Only KAD and KNOW can be defended directly.");
+    int cost = 0;
+    if (closeKnow) cost += doorPowerCost;
+    if (closeKad) cost += doorPowerCost;
+
+    if (power < cost) {
+        eventLog.push_back("Not enough energy to close both gates.");
         turn--;
         return;
     }
 
-    if (!*gate) {
-        eventLog.push_back(gateLabel + " is already open.");
-        turn--;
-        return;
-    }
-
-    *gate = false;
-    eventLog.push_back(gateLabel + " opened.");
-}
-
-// Runs the optional graph-analysis report used by the strategic risk scan action.
-void GameState::riskScan() {
-    if (power < scanPowerCost) {
-        eventLog.push_back("Not enough energy for risk scan!");
-        turn--;
-        return;
-    }
-    power -= scanPowerCost;
-    eventLog.push_back("=== RISK ANALYSIS ===");
-
-    auto aps = findArticulationPoints(gameMap.rooms, gameMap.officeId,
-                                      leftGateClosed, rightGateClosed);
-    if (!aps.empty()) {
-        eventLog.push_back("Critical rooms (articulation points):");
-        for (int ap : aps)
-            eventLog.push_back("  - " + gameMap.rooms[ap].name);
-    } else {
-        eventLog.push_back("No critical chokepoints detected.");
-    }
-
-    auto brs = findBridges(gameMap.rooms, gameMap.officeId,
-                           leftGateClosed, rightGateClosed);
-    if (!brs.empty()) {
-        eventLog.push_back("Critical corridors (bridges):");
-        for (auto &b : brs)
-            eventLog.push_back("  - " + gameMap.rooms[b.first].name +
-                " <-> " + gameMap.rooms[b.second].name);
-    }
-
-    int scanSource = (lastKnownEnemyRoom >= 0) ? lastKnownEnemyRoom : enemy.currentRoom;
-    auto path = bfsShortestPath(gameMap.rooms, scanSource, gameMap.officeId,
-                                gameMap.officeId, leftGateClosed, rightGateClosed);
-    if (!path.empty()) {
-        std::stringstream ss;
-        ss << "Shortest known path to office: " << path.size() - 1 << " steps";
-        eventLog.push_back(ss.str());
-    }
-
-    auto danger = computeDangerLevels(gameMap.rooms, gameMap.officeId,
-                                      lastKnownEnemyRoom, probMap,
-                                      leftGateClosed, rightGateClosed);
-    eventLog.push_back("Danger levels:");
-    for (auto &p : danger) {
-        std::string level;
-        if (p.second < 0.25) level = "LOW";
-        else if (p.second < 0.55) level = "MEDIUM";
-        else level = "HIGH";
-        std::stringstream ss;
-        ss << "  " << gameMap.rooms[p.first].name << ": " << level
-           << " (" << (int)(p.second * 100) << "%)";
-        eventLog.push_back(ss.str());
-    }
+    power -= cost;
+    leftGateClosed = true;
+    rightGateClosed = true;
 
     std::stringstream ss;
-    ss << "Risk scan complete (-" << scanPowerCost << "% energy)";
+    ss << "Both office gates closed (-" << cost << "% energy).";
     eventLog.push_back(ss.str());
 }
 

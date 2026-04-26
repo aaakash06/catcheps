@@ -103,7 +103,7 @@ static int chooseNextRoom(const GameState &gs, const Enemy &enemy) {
 
 // Builds a reset enemy in an invalid room until a night spawn is assigned.
 Enemy::Enemy() : currentRoom(-1), state(ROAMING),
-    lureTarget(-1), lureTimer(0), lastRoom(-1), moveChance(1.0) {}
+    lureTarget(-1), lureTimer(0), lastRoom(-1) {}
 
 // Initializes the enemy for a new night using the selected difficulty.
 void Enemy::init(int startRoom, Difficulty) {
@@ -112,7 +112,6 @@ void Enemy::init(int startRoom, Difficulty) {
     lureTarget = -1;
     lureTimer = 0;
     lastRoom = startRoom;
-    moveChance = 1.0;
 }
 
 // Moves the enemy exactly one step per turn when a legal graph move exists.

@@ -1,6 +1,9 @@
 #include "save_load.h"
 #include <fstream>
 #include <limits>
+#include <sstream>
+
+static const char *SAVE_MAGIC = "CW_SAVE_V2";
 
 template <typename T>
 static bool readValue(std::istream &in, T &value) {
@@ -12,6 +15,7 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     std::ofstream out(filename.c_str());
     if (!out.is_open()) return false;
 
+    out << SAVE_MAGIC << "\n";
     out << gs.difficulty << "\n";
     out << gs.currentNight << "\n";
     out << gs.totalNights << "\n";
@@ -23,7 +27,6 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.deepScanPowerCost << "\n";
     out << gs.lurePowerCost << "\n";
     out << gs.doorPowerCost << "\n";
-    out << gs.scanPowerCost << "\n";
     out << gs.signalDecayTurns << "\n";
     out << gs.audioProbDistance3 << "\n";
     out << gs.audioProbDistance2 << "\n";
@@ -41,7 +44,6 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.enemy.state << "\n";
     out << gs.enemy.lureTarget << "\n";
     out << gs.enemy.lureTimer << "\n";
-    out << gs.enemy.moveChance << "\n";
 
     out << gs.gameMap.totalRooms << "\n";
     out << gs.gameMap.officeId << "\n";
@@ -72,8 +74,20 @@ bool loadGame(GameState &gs, const std::string &filename) {
     std::ifstream in(filename.c_str());
     if (!in.is_open()) return false;
 
-    int diffInt;
-    if (!readValue(in, diffInt) || diffInt < EASY || diffInt > HARD) return false;
+    std::string firstToken;
+    if (!(in >> firstToken)) return false;
+
+    bool legacyFormat = false;
+    int diffInt = -1;
+    if (firstToken == SAVE_MAGIC) {
+        if (!readValue(in, diffInt)) return false;
+    } else {
+        std::istringstream ss(firstToken);
+        if (!(ss >> diffInt) || !ss.eof()) return false;
+        legacyFormat = true;
+    }
+
+    if (diffInt < EASY || diffInt > HARD) return false;
     gs.difficulty = static_cast<Difficulty>(diffInt);
 
     if (!readValue(in, gs.currentNight) ||
@@ -85,9 +99,17 @@ bool loadGame(GameState &gs, const std::string &filename) {
         !readValue(in, gs.cameraPowerCost) ||
         !readValue(in, gs.deepScanPowerCost) ||
         !readValue(in, gs.lurePowerCost) ||
-        !readValue(in, gs.doorPowerCost) ||
-        !readValue(in, gs.scanPowerCost) ||
-        !readValue(in, gs.signalDecayTurns) ||
+        !readValue(in, gs.doorPowerCost)) {
+        return false;
+    }
+
+    if (legacyFormat) {
+        int ignoredScanPowerCost;
+        if (!readValue(in, ignoredScanPowerCost))
+            return false;
+    }
+
+    if (!readValue(in, gs.signalDecayTurns) ||
         !readValue(in, gs.audioProbDistance3) ||
         !readValue(in, gs.audioProbDistance2) ||
         !readValue(in, gs.audioProbDistance1) ||
@@ -106,9 +128,13 @@ bool loadGame(GameState &gs, const std::string &filename) {
         !readValue(in, gs.enemy.lastRoom) ||
         !readValue(in, enemyState) ||
         !readValue(in, gs.enemy.lureTarget) ||
-        !readValue(in, gs.enemy.lureTimer) ||
-        !readValue(in, gs.enemy.moveChance)) {
+        !readValue(in, gs.enemy.lureTimer)) {
         return false;
+    }
+    if (legacyFormat) {
+        double ignoredMoveChance;
+        if (!readValue(in, ignoredMoveChance))
+            return false;
     }
     if (enemyState < ROAMING || enemyState > AT_OFFICE) return false;
     gs.enemy.state = static_cast<EnemyState>(enemyState);

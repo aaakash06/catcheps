@@ -8,6 +8,7 @@ enum Key {
     KEY_ENTER, KEY_SPACE, KEY_ESCAPE,
     KEY_W, KEY_A, KEY_S, KEY_D,
     KEY_C, KEY_L, KEY_R, KEY_E, KEY_Q, KEY_H,
+    KEY_Z, KEY_X,
     KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
     KEY_DOT, KEY_QUESTION,
 };

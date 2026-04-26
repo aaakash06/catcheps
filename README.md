@@ -16,14 +16,13 @@ g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp
 Run the executable from the repository root so the ASCII templates in `maps/` can be loaded correctly.
 
 ## Controls
-- `Arrow Keys`: move the cursor between connected buildings
-- `1` or `C`: Quick Sweep a camera cluster
-- `2` or `S`: Deep Scan the building under the cursor
-- `3` or `D` or `Enter`: toggle the office gate at `KAD` or `KNOW`
-- `4` or `L`: use a lure in a camera cluster
-- `5` or `E` or `Space`: wait / listen
-- `A`: run the optional risk scan
-- `R`: open the selected office gate
+- `A`: Quick Sweep a camera cluster
+- `S`: Deep Scan a building from a numbered menu
+- `Z`: close the `KNOW` office gate
+- `X`: close the `KAD` office gate
+- `C`: close both office gates
+- `L`: use a lure in a camera cluster
+- `W`: wait / listen
 - `Q`: save and quit
 - `H`: help
 
@@ -46,6 +45,7 @@ This creates survival-horror tension because the player must keep deciding betwe
 ## Quick Sweep vs Deep Scan
 ### Quick Sweep
 - Checks one camera cluster
+- Uses a numbered cluster menu
 - Cheaper than Deep Scan
 - Does not reveal the exact room
 
@@ -55,6 +55,7 @@ Example:
 
 ### Deep Scan
 - Checks one exact building
+- Uses a numbered building menu
 - Costs more energy
 - Reveals the exact room if the enemy is there
 
@@ -87,6 +88,14 @@ Example:
 - the enemy still moves
 - win/loss checks still happen
 - no energy is drained on a pure wait turn
+
+### Door Upkeep Rule
+- upkeep is charged per `closed` office gate, not per open gate
+- `0` closed gates = `0` door upkeep
+- `1` closed gate = upkeep for `1`
+- `2` closed gates = upkeep for `2`
+- this upkeep only applies on turns where the player uses an active action
+- if the player chooses to wait, no energy is drained at all
 
 This keeps waiting risky without making it a hidden energy tax.
 
@@ -142,7 +151,7 @@ The signal then decays over time:
 Display examples:
 - current turn: `LIB [!!]`
 - stale but still useful: `LIB [?]`
-- expired: `No reliable signal.`
+- expired: `Unknown`
 
 This forces the player to reason about where the enemy might have moved after the last confirmed sighting.
 

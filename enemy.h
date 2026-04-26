@@ -22,7 +22,6 @@ struct Enemy {
     int lureTarget;      // room id or -1
     int lureTimer;       // turns remaining on lure
     int lastRoom;        // previous room
-    double moveChance;   // probability of moving each turn (difficulty)
 
     Enemy();
     void init(int startRoom, Difficulty diff);

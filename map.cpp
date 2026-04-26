@@ -101,13 +101,6 @@ GameMap buildMap(Difficulty diff) {
     return gm;
 }
 
-std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown) {
-    if (r.isOffice) return "[SAFE]";
-    if (r.id == enemyRoom) return "[!]";
-    if (r.id == lastKnown) return "[?]";
-    return "[ ]";
-}
-
 std::string cameraGroupLabel(const GameMap &map, int group) {
     if (map.totalRooms == 8) {
         if (group == 0) return "West";
@@ -133,12 +126,8 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
         return "?";
     }
 
-    if (group == 0) return "Inner Ring";
-    if (group == 1) return "Middle Ring";
-    if (group == 2) return "Outer Ring";
     return "?";
 }
-
 bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
     if (roomId < 0 || roomId >= map.totalRooms) return false;
 
@@ -193,7 +182,7 @@ int findSpawnRoom(const GameMap &map) {
 
     std::vector<int> farRooms;
     for (auto &p : dist)
-        if (p.second >= maxDist - 1)
+        if (p.second == maxDist)
             farRooms.push_back(p.first);
 
     return farRooms[std::rand() % farRooms.size()];

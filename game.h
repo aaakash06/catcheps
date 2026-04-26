@@ -22,7 +22,6 @@ struct GameState {
     int deepScanPowerCost;    // Deep Scan cost
     int lurePowerCost;
     int doorPowerCost;        // Closed-gate upkeep per active turn
-    int scanPowerCost;
     int signalDecayTurns;
     int audioProbDistance3;
     int audioProbDistance2;
@@ -59,8 +58,7 @@ struct GameState {
     void deepScan(int roomId);
     void playLure(int group);
     void toggleGate(int roomId);
-    void openGate(int roomId);
-    void riskScan();
+    void toggleBothGates();
     void updateProbMap();
 };
 
