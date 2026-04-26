@@ -49,10 +49,10 @@ GameMap buildMap(Difficulty diff) {
         gm.rooms[i].isCamera = true;
     }
 
-    // Camera groups:
-    // 0=Upper: MW(8), RM(9), RHS(10), RR(11), JL(12)
-    // 1=Central: HC(6), HW(7), CYM(5)
-    // 2=Lower: LIB(2), KKL(1), KAD(3), KNOW(4), MB(0)
+    // Camera clusters:
+    // 0=East Wing: MW(8), RM(9), RHS(10), RR(11), JL(12)
+    // 1=Core Campus: HC(6), HW(7), CYM(5)
+    // 2=West Wing: LIB(2), KKL(1), KAD(3), KNOW(4), MB(0)
     int groups13[] = {2, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0};
     for (int i = 0; i < n; i++)
         gm.rooms[i].cameraGroup = groups13[i];
@@ -97,9 +97,9 @@ std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown) {
 }
 
 std::string cameraGroupLabel(int group) {
-    if (group == 0) return "Upper";
-    if (group == 1) return "Central";
-    if (group == 2) return "Lower";
+    if (group == 0) return "EAST WING";
+    if (group == 1) return "CORE CAMPUS";
+    if (group == 2) return "WEST WING";
     return "?";
 }
 

@@ -64,27 +64,27 @@ static void runGameLoop(GameState &gs) {
 
         // Actions
         if (k == KEY_C) {
-            // Camera check
+            // Quick Sweep: broad cluster ping, temporary result.
             int group = selectCameraGroup(gs);
             if (group >= 0)
-                gs.doTurn(1, group);
+                gs.doTurn(ACTION_QUICK_SWEEP, group);
         } else if (k == KEY_L) {
             // Lure
             int group = selectCameraGroup(gs);
             if (group >= 0)
-                gs.doTurn(2, group);
+                gs.doTurn(ACTION_LURE, group);
         } else if (k == KEY_D) {
             // Close door at cursor
-            gs.doTurn(3, cursorRoom);
+            gs.doTurn(ACTION_CLOSE_DOOR, cursorRoom);
         } else if (k == KEY_R) {
             // Restore door at cursor
-            gs.doTurn(4, cursorRoom);
+            gs.doTurn(ACTION_RESTORE_DOOR, cursorRoom);
         } else if (k == KEY_S) {
-            // Risk scan
-            gs.doTurn(5, -1);
+            // Deep Scan: exact room ping, temporary result.
+            gs.doTurn(ACTION_DEEP_SCAN, cursorRoom);
         } else if (k == KEY_E || k == KEY_DOT || k == KEY_SPACE) {
-            // End turn (wait)
-            gs.doTurn(6, -1);
+            // Wait and listen
+            gs.doTurn(ACTION_WAIT, -1);
         } else if (k == KEY_Q) {
             // Save & quit
             restoreTerminal();
@@ -99,7 +99,7 @@ static void runGameLoop(GameState &gs) {
             drawHelp();
         } else if (k == KEY_ENTER) {
             // Enter on a building — close door action
-            gs.doTurn(3, cursorRoom);
+            gs.doTurn(ACTION_CLOSE_DOOR, cursorRoom);
         }
     }
 

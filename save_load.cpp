@@ -53,6 +53,15 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     for (auto &p : gs.probMap)
         out << p.first << " " << p.second << "\n";
 
+    // Per-turn camera signal memory (added after legacy fields for compatibility).
+    out << gs.lastKnownTurn << "\n";
+    out << gs.lastCameraWasDeepScan << "\n";
+    out << gs.cameraSystem.lastKnownRoom << "\n";
+    out << gs.cameraSystem.lastKnownCluster << "\n";
+    out << gs.cameraSystem.lastDetectedTurn << "\n";
+    out << gs.cameraSystem.lastSignalExact << "\n";
+    out << gs.cameraSystem.lastSignalLabel << "\n";
+
     out.close();
     return true;
 }
@@ -64,6 +73,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
     int diffInt;
     in >> diffInt;
     gs.difficulty = (Difficulty)diffInt;
+    setDifficultyParams(gs, gs.difficulty);
     in >> gs.currentNight >> gs.totalNights >> gs.turn >> gs.maxTurns;
     in >> gs.power >> gs.maxPower >> gs.cameraPowerCost >> gs.lurePowerCost;
     in >> gs.doorPowerCost >> gs.scanPowerCost >> gs.lureCooldownMax >> gs.currentLureCooldown;
@@ -112,6 +122,19 @@ bool loadGame(GameState &gs, const std::string &filename) {
     gs.status = STATUS_PLAYING;
     gs.statusMessage = "";
     gs.lastCameraCheck.clear();
+    gs.lastKnownTurn = -999;
+    gs.lastCameraWasDeepScan = false;
+    gs.cameraSystem.reset();
+    if (in >> gs.lastKnownTurn) {
+        in >> gs.lastCameraWasDeepScan;
+        in >> gs.cameraSystem.lastKnownRoom;
+        in >> gs.cameraSystem.lastKnownCluster;
+        in >> gs.cameraSystem.lastDetectedTurn;
+        in >> gs.cameraSystem.lastSignalExact;
+        in.ignore();
+        std::getline(in, gs.cameraSystem.lastSignalLabel);
+        gs.cameraSystem.lastKnownRoom = gs.lastKnownEnemyRoom;
+    }
     gs.eventLog.clear();
     gs.eventLog.push_back("Game loaded successfully.");
 

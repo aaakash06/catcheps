@@ -1,4 +1,50 @@
 #include "terminal.h"
+
+#ifdef _WIN32
+#include <conio.h>
+
+void initTerminal() {}
+
+void restoreTerminal() {}
+
+Key getKey() {
+    int c = _getch();
+    if (c == 0 || c == 224) {
+        int seq = _getch();
+        switch (seq) {
+            case 72: return KEY_UP;
+            case 80: return KEY_DOWN;
+            case 77: return KEY_RIGHT;
+            case 75: return KEY_LEFT;
+        }
+        return KEY_UNKNOWN;
+    }
+
+    if (c == '\n' || c == '\r') return KEY_ENTER;
+    if (c == ' ') return KEY_SPACE;
+    if (c == 27) return KEY_ESCAPE;
+    if (c == 'w' || c == 'W') return KEY_W;
+    if (c == 'a' || c == 'A') return KEY_A;
+    if (c == 's' || c == 'S') return KEY_S;
+    if (c == 'd' || c == 'D') return KEY_D;
+    if (c == 'c' || c == 'C') return KEY_C;
+    if (c == 'l' || c == 'L') return KEY_L;
+    if (c == 'r' || c == 'R') return KEY_R;
+    if (c == 'e' || c == 'E') return KEY_E;
+    if (c == 'q' || c == 'Q') return KEY_Q;
+    if (c == 'h' || c == 'H') return KEY_H;
+    if (c == '0') return KEY_0;
+    if (c == '1') return KEY_1;
+    if (c == '2') return KEY_2;
+    if (c == '3') return KEY_3;
+    if (c == '4') return KEY_4;
+    if (c == '.') return KEY_DOT;
+    if (c == '?') return KEY_QUESTION;
+
+    return KEY_UNKNOWN;
+}
+
+#else
 #include <termios.h>
 #include <unistd.h>
 #include <cstdio>
@@ -58,3 +104,4 @@ Key getKey() {
 
     return KEY_UNKNOWN;
 }
+#endif

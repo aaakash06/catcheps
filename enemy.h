@@ -6,6 +6,8 @@
 #include <string>
 #include "map.h"
 
+struct DifficultySettings;
+
 enum EnemyState { ROAMING, INVESTIGATING, ATTACKING, AT_OFFICE };
 
 struct Enemy {
@@ -21,6 +23,7 @@ struct Enemy {
     Enemy();
     void init(int startRoom, Difficulty diff);
     void move(const GameMap &map);
+    void moveWeighted(const GameMap &map, const DifficultySettings &settings);
     void applyLure(int targetRoom, int duration);
     void tickLure();
 };

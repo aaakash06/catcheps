@@ -202,6 +202,12 @@ void drawMap(const GameState &gs, int cursorRoom) {
         }
     }
 
+    int visibleKnownRoom = -1;
+    int signalAge = gs.turn - gs.cameraSystem.lastDetectedTurn;
+    if (gs.cameraSystem.lastSignalExact &&
+        signalAge >= 0 && signalAge < gs.settings.signalDecayTurns)
+        visibleKnownRoom = gs.cameraSystem.lastKnownRoom;
+
     // Output with colorization
     for (int sr = 0; sr < scrH; sr++) {
         std::cout << "  ";
@@ -219,8 +225,8 @@ void drawMap(const GameState &gs, int cursorRoom) {
             if (bldgId >= 0 && c == posMap[bldgId].col) {
                 // Start of building — print colored label
                 std::cout << buildingLabel(gs.gameMap.rooms[bldgId],
-                                            gs.enemy.currentRoom,
-                                            gs.lastKnownEnemyRoom,
+                                            -1,
+                                            visibleKnownRoom,
                                             bldgId == cursorRoom);
                 c += 5; // skip the rest of the label
             } else {
@@ -232,9 +238,8 @@ void drawMap(const GameState &gs, int cursorRoom) {
 
     // Legend
     std::cout << CLR_DIM << "  " << CLR_GREEN << "<MB>" << CLR_RESET << CLR_DIM
-              << "=Office  " << CLR_RED << "[!!]" << CLR_RESET << CLR_DIM
-              << "=Enemy  " << CLR_YELLOW << "[??]" << CLR_RESET << CLR_DIM
-              << "=Last Seen  " << CLR_BLUE << "[XX]" << CLR_RESET << CLR_DIM
+              << "=Office  " << CLR_YELLOW << "[??]" << CLR_RESET << CLR_DIM
+              << "=Deep Scan Signal  " << CLR_BLUE << "[XX]" << CLR_RESET << CLR_DIM
               << "=Door  " << CLR_CYAN << "[CUR]" << CLR_RESET << CLR_DIM
               << "=Cursor" << CLR_RESET << "\n";
 }
@@ -242,14 +247,25 @@ void drawMap(const GameState &gs, int cursorRoom) {
 void drawCameraFeed(const GameState &gs) {
     if (gs.lastCameraCheck.empty()) return;
 
-    std::cout << CLR_BOLD << "  Camera " << cameraGroupLabel(gs.lastCameraGroupChecked)
-              << " Feed:" << CLR_RESET << "\n";
+    std::cout << CLR_BOLD << "  Scan Result:" << CLR_RESET << "\n";
     for (auto &cs : gs.lastCameraCheck) {
-        std::string roomName = gs.gameMap.rooms[cs.roomId].abbrev;
-        if (cs.enemyPresent)
-            std::cout << "  " << CLR_RED << "[!!] " << roomName << ": " << cs.status << CLR_RESET << "\n";
-        else
-            std::cout << "  " << CLR_GREEN << "[OK] " << roomName << ": " << cs.status << CLR_RESET << "\n";
+        if (cs.deepScan) {
+            std::string roomName = gs.gameMap.rooms[cs.roomId].abbrev;
+            if (cs.enemyPresent)
+                std::cout << "  " << CLR_RED << "[!!] SCAN " << roomName
+                          << ": " << cs.status << CLR_RESET << "\n";
+            else
+                std::cout << "  " << CLR_GREEN << "[OK] SCAN " << roomName
+                          << ": " << cs.status << CLR_RESET << "\n";
+        } else {
+            std::string cluster = cameraGroupLabel(cs.clusterId);
+            if (cs.enemyPresent)
+                std::cout << "  " << CLR_RED << "[!!] SCAN " << cluster
+                          << ": Movement detected." << CLR_RESET << "\n";
+            else
+                std::cout << "  " << CLR_GREEN << "[OK] SCAN " << cluster
+                          << ": No movement detected." << CLR_RESET << "\n";
+        }
     }
     std::cout << "\n";
 }
@@ -266,9 +282,13 @@ void drawGame(const GameState &gs, int cursorRoom) {
               << " " << powerBar(gs.power, gs.maxPower) << "\n";
     bool officeSafe = (gs.enemy.currentRoom != gs.gameMap.officeId);
     std::cout << "  OFFICE: " << (officeSafe ? CLR_GREEN "SAFE" : CLR_RED "BREACHED!") << CLR_RESET;
+    std::cout << "   Door Cost: -" << gs.settings.doorCost << "%/turn";
     if (gs.currentLureCooldown > 0)
         std::cout << CLR_YELLOW << "   Lure CD: " << gs.currentLureCooldown << CLR_RESET;
     std::cout << "\n";
+    std::cout << "  Last Known Signal: "
+              << CLR_YELLOW << gs.cameraSystem.getSignalDisplay(gs.turn, gs.settings.signalDecayTurns)
+              << CLR_RESET << "\n";
     std::cout << "================================================================\n";
     std::cout << CLR_RESET;
 
@@ -292,20 +312,23 @@ void drawGame(const GameState &gs, int cursorRoom) {
               << CLR_CYAN << "[L]" CLR_RESET << CLR_BOLD "ure  "
               << CLR_CYAN << "[D]" CLR_RESET << CLR_BOLD "oor  "
               << CLR_CYAN << "[R]" CLR_RESET << CLR_BOLD "estore  "
-              << CLR_CYAN << "[S]" CLR_RESET << CLR_BOLD "can  "
-              << CLR_CYAN << "[E]" CLR_RESET << CLR_BOLD "nd turn  "
+              << CLR_CYAN << "[S]" CLR_RESET << CLR_BOLD "can room  "
+              << CLR_CYAN << "[E]" CLR_RESET << CLR_BOLD "ait/listen  "
               << CLR_CYAN << "[Q]" CLR_RESET << CLR_BOLD "uit  "
               << CLR_CYAN << "[H]" CLR_RESET << CLR_BOLD "elp\n";
 
     // Cursor info
     if (cursorRoom >= 0 && cursorRoom < gs.gameMap.totalRooms) {
         auto &curRoom = gs.gameMap.rooms[cursorRoom];
-        std::cout << "  Cursor: " << CLR_CYAN << curRoom.abbrev << CLR_RESET
+    std::cout << "  Cursor: " << CLR_CYAN << curRoom.abbrev << CLR_RESET
                   << " (" << curRoom.name << ")";
         if (curRoom.doorClosed) std::cout << CLR_BLUE " [DOOR CLOSED]" CLR_RESET;
+        std::cout << "   Deep Scan: -" << gs.deepScanPowerCost << "%";
     }
     std::cout << "\n";
-    std::cout << "  Navigate: " CLR_CYAN "Arrow Keys" CLR_RESET "   Select: " CLR_CYAN "Enter" CLR_RESET "\n";
+    std::cout << "  Quick Sweep: -" << gs.quickSweepPowerCost << "%   Lure: -"
+              << gs.lurePowerCost << "%   Navigate: " CLR_CYAN "Arrow Keys" CLR_RESET
+              << "   Enter closes door\n";
     std::cout << "================================================================\n";
     std::cout << CLR_RESET;
 }
@@ -320,8 +343,9 @@ void drawMainMenu() {
     std::cout << "\n";
     std::cout << "  You are a night security guard at the\n";
     std::cout << "  University of Hong Kong. An intruder stalks\n";
-    std::cout << "  through the campus buildings. Monitor cameras,\n";
-    std::cout << "  use sound lures, close doors, and survive\n";
+    std::cout << "  through the campus buildings. Sweep camera\n";
+    std::cout << "  clusters, deep scan rooms, use sound lures,\n";
+    std::cout << "  close doors, and survive\n";
     std::cout << "  until 6 AM each night.\n";
     std::cout << "\n";
     std::cout << CLR_BOLD;
@@ -392,27 +416,36 @@ void drawHelp() {
     std::cout << "================================================================\n\n";
     std::cout << CLR_RESET;
     std::cout << "  OBJECTIVE:\n";
-    std::cout << "  Survive each night until 6 AM by monitoring\n";
-    std::cout << "  cameras and redirecting the intruder away from\n";
-    std::cout << "  " CLR_GREEN "Main Building (MB)" CLR_RESET " — your office.\n\n";
+    std::cout << "  Survive each night until 6 AM by choosing\n";
+    std::cout << "  one action each turn: sweep clusters, deep scan\n";
+    std::cout << "  rooms, defend doors, use lures, or listen.\n";
+    std::cout << "  Keep the intruder away from\n";
+    std::cout << "  " CLR_GREEN "Main Building (MB)" CLR_RESET " - your office.\n\n";
     std::cout << CLR_BOLD << "  CONTROLS:\n" CLR_RESET;
     std::cout << "  Arrow Keys - Move cursor on map\n";
     std::cout << "  Enter      - Close door at cursor\n";
-    std::cout << "  " CLR_CYAN "C" CLR_RESET " - Check camera group\n";
+    std::cout << "  " CLR_CYAN "C" CLR_RESET " - Quick Sweep a camera cluster\n";
     std::cout << "  " CLR_CYAN "L" CLR_RESET " - Play sound lure at group\n";
     std::cout << "  " CLR_CYAN "D" CLR_RESET " - Close door at cursor building\n";
     std::cout << "  " CLR_CYAN "R" CLR_RESET " - Restore door at cursor building\n";
-    std::cout << "  " CLR_CYAN "S" CLR_RESET " - Risk scan (analyze map)\n";
-    std::cout << "  " CLR_CYAN "E" CLR_RESET " - End turn (wait)\n";
+    std::cout << "  " CLR_CYAN "S" CLR_RESET " - Deep Scan cursor building\n";
+    std::cout << "  " CLR_CYAN "E" CLR_RESET " - Wait / listen\n";
     std::cout << "  " CLR_CYAN "Q" CLR_RESET " - Save & quit\n\n";
     std::cout << CLR_BOLD << "  CAMERA GROUPS:\n" CLR_RESET;
-    std::cout << "  " CLR_YELLOW "Upper" CLR_RESET " - MW, RM, RHS, RR, JL\n";
-    std::cout << "  " CLR_YELLOW "Central" CLR_RESET " - HC, HW, CYM\n";
-    std::cout << "  " CLR_YELLOW "Lower" CLR_RESET " - MB, KKL, LIB, KAD, KNOW\n\n";
+    std::cout << "  " CLR_YELLOW "EAST WING" CLR_RESET " - MW, RM, RHS, RR, JL\n";
+    std::cout << "  " CLR_YELLOW "CORE CAMPUS" CLR_RESET " - HC, HW, CYM\n";
+    std::cout << "  " CLR_YELLOW "WEST WING" CLR_RESET " - MB, KKL, LIB, KAD, KNOW\n\n";
+    std::cout << CLR_BOLD << "  CAMERA RULES:\n" CLR_RESET;
+    std::cout << "  - Quick Sweep reports only movement in a cluster.\n";
+    std::cout << "  - Deep Scan checks one exact building.\n";
+    std::cout << "  - Cameras shut off after each scan result.\n";
+    std::cout << "  - Last known signals decay by difficulty.\n\n";
     std::cout << CLR_BOLD << "  TIPS:\n" CLR_RESET;
-    std::cout << "  - Use risk scans to find chokepoints.\n";
+    std::cout << "  - Use sweeps to narrow the search cheaply.\n";
+    std::cout << "  - Use deep scans when prediction matters.\n";
     std::cout << "  - Close doors at HC to cut off paths.\n";
     std::cout << "  - Lure the intruder to the upper campus.\n";
+    std::cout << "  - Audio hints are truthful but not guaranteed.\n";
     std::cout << "  - Manage power carefully!\n";
     std::cout << "\n================================================================\n";
     std::cout << "  Press Enter to go back...\n";

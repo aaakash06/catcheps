@@ -1,4 +1,5 @@
 #include "enemy.h"
+#include "game.h"
 #include "graph_algos.h"
 #include <cstdlib>
 #include <algorithm>
@@ -97,6 +98,77 @@ void Enemy::move(const GameMap &map) {
     if (currentRoom == map.officeId)
         state = AT_OFFICE;
     else if (lureTimer > 0 && currentRoom == lureTarget)
+        state = INVESTIGATING;
+    else
+        state = ROAMING;
+}
+
+void Enemy::moveWeighted(const GameMap &map, const DifficultySettings &settings) {
+    if (currentRoom < 0 || currentRoom >= map.totalRooms) return;
+
+    auto &room = map.rooms[currentRoom];
+    if (room.doorClosed) return;
+
+    std::vector<int> candidates;
+    for (int nb : room.neighbors)
+        if (!map.rooms[nb].doorClosed)
+            candidates.push_back(nb);
+    if (candidates.empty()) return;
+
+    std::map<int, int> targetDist;
+    int target = map.officeId;
+    if (lureTimer > 0 && lureTarget >= 0) {
+        target = lureTarget;
+        targetDist = bfsDistances(map.rooms, lureTarget);
+    } else {
+        targetDist = bfsDistances(map.rooms, map.officeId);
+    }
+
+    int currentDist = targetDist.count(currentRoom) ? targetDist[currentRoom] : 999;
+    std::vector<int> closer;
+    std::vector<int> sideways;
+    std::vector<int> farther;
+
+    for (int nb : candidates) {
+        int nd = targetDist.count(nb) ? targetDist[nb] : 999;
+        if (nd < currentDist)
+            closer.push_back(nb);
+        else if (nd == currentDist)
+            sideways.push_back(nb);
+        else
+            farther.push_back(nb);
+    }
+
+    std::vector<int> pool;
+    int roll = std::rand() % 100;
+    if (roll < settings.moveCloserProb && !closer.empty()) {
+        pool = closer;
+    } else if (roll < settings.moveCloserProb + settings.moveSidewaysProb && !sideways.empty()) {
+        pool = sideways;
+    } else if (settings.moveRandomProb > 0) {
+        pool = candidates;
+    }
+
+    if (pool.empty()) {
+        if (!closer.empty()) pool = closer;
+        else if (!sideways.empty()) pool = sideways;
+        else pool = candidates;
+    }
+
+    std::vector<int> preferred;
+    for (int rid : pool)
+        if (rid != lastRoom)
+            preferred.push_back(rid);
+    if (!preferred.empty())
+        pool = preferred;
+
+    int chosen = pool[std::rand() % pool.size()];
+    lastRoom = currentRoom;
+    currentRoom = chosen;
+
+    if (currentRoom == map.officeId)
+        state = AT_OFFICE;
+    else if (lureTimer > 0 && currentRoom == target)
         state = INVESTIGATING;
     else
         state = ROAMING;

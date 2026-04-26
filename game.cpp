@@ -3,12 +3,67 @@
 #include <cstdlib>
 #include <sstream>
 
+CameraSystem::CameraSystem() {
+    reset();
+}
+
+void CameraSystem::reset() {
+    lastKnownRoom = -1;
+    lastKnownCluster = -1;
+    lastDetectedTurn = -999;
+    lastSignalLabel = "";
+    lastSignalExact = false;
+}
+
+void CameraSystem::updateLastKnownSignal(int roomId, int clusterId, const std::string &label,
+                                         bool exact, int currentTurn) {
+    lastKnownRoom = roomId;
+    lastKnownCluster = clusterId;
+    lastSignalLabel = label;
+    lastSignalExact = exact;
+    lastDetectedTurn = currentTurn;
+}
+
+std::string CameraSystem::getSignalDisplay(int currentTurn, int decayTurns) const {
+    if (lastSignalLabel.empty()) return "No reliable signal.";
+    int age = currentTurn - lastDetectedTurn;
+    if (age < 0 || age >= decayTurns) return "No reliable signal.";
+    if (age == 0) return lastSignalLabel + " [!!]";
+    return lastSignalLabel + " [?]";
+}
+
+std::string AudioHintSystem::maybeGenerateHint(const GameMap &map, int enemyRoom,
+                                               int distanceToOffice, Difficulty diff,
+                                               const DifficultySettings &settings) {
+    int chance = 0;
+    if (distanceToOffice == 1) chance = settings.audioProbDistance1;
+    else if (distanceToOffice == 2) chance = settings.audioProbDistance2;
+    else if (distanceToOffice == 3) chance = settings.audioProbDistance3;
+    else return "";
+
+    if ((std::rand() % 100) >= chance) return "";
+
+    if (distanceToOffice == 1)
+        return "You hear urgent movement just outside the office approach.";
+
+    int cluster = (enemyRoom >= 0 && enemyRoom < map.totalRooms)
+        ? map.rooms[enemyRoom].cameraGroup : -1;
+    std::string area = cameraGroupLabel(cluster);
+
+    if (diff == EASY)
+        return "You hear footsteps somewhere near the " + area + " area...";
+    if (diff == NORMAL)
+        return "You hear a faint sound from " + area + " campus...";
+    return "Something echoes in the distance...";
+}
+
 GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(5),
     turn(0), maxTurns(30), power(100), maxPower(100),
-    cameraPowerCost(3), lurePowerCost(8), doorPowerCost(5), scanPowerCost(10),
+    cameraPowerCost(1), quickSweepPowerCost(1), deepScanPowerCost(3),
+    lurePowerCost(3), doorPowerCost(1), scanPowerCost(3),
     lureCooldown(0), lureCooldownMax(2), currentLureCooldown(0),
-    lastKnownEnemyRoom(-1), lastCameraGroupChecked(-1),
-    status(STATUS_PLAYING) {}
+    lastKnownEnemyRoom(-1), lastKnownTurn(-999), lastCameraGroupChecked(-1),
+    lastCameraWasDeepScan(false), status(STATUS_PLAYING) {}
 
 void setDifficultyParams(GameState &gs, Difficulty diff) {
     gs.difficulty = diff;
@@ -16,30 +71,27 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.totalNights = 3;
         gs.maxPower = 150;
         gs.maxTurns = 30;
-        gs.cameraPowerCost = 3;
-        gs.lurePowerCost = 8;
-        gs.doorPowerCost = 5;
-        gs.scanPowerCost = 10;
+        gs.settings = {1, 3, 1, 3, 25, 40, 65, 3, 55, 30, 15};
         gs.lureCooldownMax = 2;
     } else if (diff == NORMAL) {
         gs.totalNights = 4;
         gs.maxPower = 120;
         gs.maxTurns = 35;
-        gs.cameraPowerCost = 5;
-        gs.lurePowerCost = 12;
-        gs.doorPowerCost = 8;
-        gs.scanPowerCost = 15;
+        gs.settings = {2, 5, 1, 4, 20, 35, 60, 2, 65, 25, 10};
         gs.lureCooldownMax = 3;
     } else {
         gs.totalNights = 5;
         gs.maxPower = 100;
         gs.maxTurns = 40;
-        gs.cameraPowerCost = 7;
-        gs.lurePowerCost = 15;
-        gs.doorPowerCost = 10;
-        gs.scanPowerCost = 18;
+        gs.settings = {3, 6, 2, 5, 10, 25, 45, 1, 85, 15, 0};
         gs.lureCooldownMax = 4;
     }
+    gs.quickSweepPowerCost = gs.settings.quickSweepCost;
+    gs.deepScanPowerCost = gs.settings.deepScanCost;
+    gs.cameraPowerCost = gs.settings.quickSweepCost;
+    gs.lurePowerCost = gs.settings.lureCost;
+    gs.doorPowerCost = gs.settings.doorCost;
+    gs.scanPowerCost = gs.settings.deepScanCost;
 }
 
 void GameState::init(Difficulty diff) {
@@ -64,8 +116,11 @@ void GameState::newNight() {
     int spawn = findSpawnRoom(gameMap);
     enemy.init(spawn, difficulty);
     lastKnownEnemyRoom = -1;
+    lastKnownTurn = -999;
     lastCameraCheck.clear();
     lastCameraGroupChecked = -1;
+    lastCameraWasDeepScan = false;
+    cameraSystem.reset();
     currentLureCooldown = 0;
 
     // Reset doors
@@ -92,13 +147,13 @@ void GameState::doTurn(int action, int param) {
     lastCameraCheck.clear();
 
     switch (action) {
-        case 1: checkCamera(param); break;
-        case 2: playLure(param); break;
-        case 3: closeDoor(param); break;
-        case 4: restoreDoor(param); break;
-        case 5: riskScan(); break;
-        case 6: // end turn, no action
-            eventLog.push_back("You wait...");
+        case ACTION_QUICK_SWEEP: quickSweep(param); break;
+        case ACTION_LURE: playLure(param); break;
+        case ACTION_CLOSE_DOOR: closeDoor(param); break;
+        case ACTION_RESTORE_DOOR: restoreDoor(param); break;
+        case ACTION_DEEP_SCAN: deepScan(param); break;
+        case ACTION_WAIT:
+            eventLog.push_back("You wait and listen...");
             break;
         default:
             eventLog.push_back("Invalid action.");
@@ -122,7 +177,7 @@ void GameState::doTurn(int action, int param) {
     // Door upkeep
     for (auto &r : gameMap.rooms) {
         if (r.doorClosed) {
-            power -= 1;
+            power -= settings.doorCost;
             if (power < 0) power = 0;
         }
     }
@@ -133,11 +188,15 @@ void GameState::doTurn(int action, int param) {
 
 void GameState::enemyTurn() {
     enemy.tickLure();
-    enemy.move(gameMap);
+    enemy.moveWeighted(gameMap, settings);
 
-    std::stringstream ss;
-    ss << "Turn " << turn << ": Enemy moved.";
-    eventLog.push_back(ss.str());
+    auto dist = bfsDistances(gameMap.rooms, gameMap.officeId);
+    if (dist.count(enemy.currentRoom)) {
+        std::string hint = AudioHintSystem::maybeGenerateHint(
+            gameMap, enemy.currentRoom, dist[enemy.currentRoom], difficulty, settings);
+        if (!hint.empty())
+            eventLog.push_back("Audio: " + hint);
+    }
 }
 
 void GameState::checkConditions() {
@@ -163,41 +222,83 @@ void GameState::checkConditions() {
     }
 }
 
-void GameState::checkCamera(int group) {
-    if (power < cameraPowerCost) {
-        eventLog.push_back("Not enough power for camera check!");
+void GameState::quickSweep(int group) {
+    if (power < quickSweepPowerCost) {
+        eventLog.push_back("Not enough power for quick sweep!");
         turn--;
         return;
     }
-    power -= cameraPowerCost;
+    power -= quickSweepPowerCost;
     lastCameraGroupChecked = group;
+    lastCameraWasDeepScan = false;
 
     auto roomIds = roomsInGroup(gameMap, group);
+    bool detected = false;
     for (int rid : roomIds) {
-        CameraSighting cs;
-        cs.roomId = rid;
+        if (enemy.currentRoom == rid) detected = true;
+    }
 
-        bool detected = (enemy.currentRoom == rid);
-        // On harder difficulties, chance to miss detection
-        if (detected && difficulty == NORMAL && (std::rand() % 100) < 10)
-            detected = false;
-        if (detected && difficulty == HARD && (std::rand() % 100) < 20)
-            detected = false;
+    CameraSighting cs;
+    cs.roomId = detected ? enemy.currentRoom : -1;
+    cs.clusterId = group;
+    cs.enemyPresent = detected;
+    cs.deepScan = false;
+    cs.status = detected ? "Movement detected." : "No movement detected.";
+    lastCameraCheck.push_back(cs);
 
-        cs.enemyPresent = detected;
-        if (detected) {
-            cs.status = "ENEMY DETECTED!";
-            lastKnownEnemyRoom = rid;
-            eventLog.push_back("Camera " + cameraGroupLabel(group) +
-                ": Enemy spotted in " + gameMap.rooms[rid].name + "!");
-        } else {
-            cs.status = "Clear";
-        }
-        lastCameraCheck.push_back(cs);
+    std::string label = cameraGroupLabel(group);
+    eventLog.push_back("SCAN " + label);
+    if (detected) {
+        lastKnownEnemyRoom = enemy.currentRoom;
+        lastKnownTurn = turn;
+        cameraSystem.updateLastKnownSignal(enemy.currentRoom, group, label, false, turn);
+        eventLog.push_back("Movement detected in " + label + ".");
+    } else {
+        eventLog.push_back("No movement detected.");
     }
 
     std::stringstream ss;
-    ss << "Checked Camera " << cameraGroupLabel(group) << " (-" << cameraPowerCost << " power)";
+    ss << "Quick Sweep cost: -" << quickSweepPowerCost << "% energy.";
+    eventLog.push_back(ss.str());
+}
+
+void GameState::deepScan(int roomId) {
+    if (roomId < 0 || roomId >= gameMap.totalRooms) {
+        eventLog.push_back("Invalid building!");
+        turn--;
+        return;
+    }
+    if (power < deepScanPowerCost) {
+        eventLog.push_back("Not enough power for deep scan!");
+        turn--;
+        return;
+    }
+    power -= deepScanPowerCost;
+    lastCameraGroupChecked = gameMap.rooms[roomId].cameraGroup;
+    lastCameraWasDeepScan = true;
+
+    bool detected = (enemy.currentRoom == roomId);
+    CameraSighting cs;
+    cs.roomId = roomId;
+    cs.clusterId = gameMap.rooms[roomId].cameraGroup;
+    cs.enemyPresent = detected;
+    cs.deepScan = true;
+    cs.status = detected ? "Enemy detected." : "No movement detected.";
+    lastCameraCheck.push_back(cs);
+
+    eventLog.push_back("SCAN " + gameMap.rooms[roomId].abbrev);
+    if (detected) {
+        lastKnownEnemyRoom = roomId;
+        lastKnownTurn = turn;
+        cameraSystem.updateLastKnownSignal(
+            roomId, cs.clusterId, gameMap.rooms[roomId].abbrev, true, turn);
+        eventLog.push_back("Enemy detected at " + gameMap.rooms[roomId].abbrev + ".");
+    } else {
+        eventLog.push_back("No movement detected.");
+    }
+
+    std::stringstream ss;
+    ss << "Deep Scan cost: -" << deepScanPowerCost << "% energy.";
     eventLog.push_back(ss.str());
 }
 
@@ -225,8 +326,8 @@ void GameState::playLure(int group) {
     enemy.applyLure(target, duration);
 
     std::stringstream ss;
-    ss << "Played sound at Camera " << cameraGroupLabel(group)
-       << " (" << gameMap.rooms[target].name << ") (-" << lurePowerCost << " power)";
+    ss << "Played sound lure at " << cameraGroupLabel(group)
+       << " (" << gameMap.rooms[target].name << ") (-" << lurePowerCost << "% energy)";
     eventLog.push_back(ss.str());
     eventLog.push_back("Enemy is now investigating the sound!");
 }
@@ -255,7 +356,8 @@ void GameState::closeDoor(int roomId) {
     power -= doorPowerCost;
     gameMap.rooms[roomId].doorClosed = true;
     std::stringstream ss;
-    ss << "Closed door at " << gameMap.rooms[roomId].name << " (-" << doorPowerCost << " power)";
+    ss << "Closed door at " << gameMap.rooms[roomId].name
+       << ". Door drains -" << doorPowerCost << "% each turn while closed.";
     eventLog.push_back(ss.str());
 }
 
