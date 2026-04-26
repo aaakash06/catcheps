@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 
+// Returns whether a graph edge is currently blocked by one of the two office gates.
 static bool isBlockedOfficeEdge(int officeId, bool leftGateClosed, bool rightGateClosed,
                                 int from, int to) {
     const int KAD = 3;
@@ -19,6 +20,7 @@ static bool isBlockedOfficeEdge(int officeId, bool leftGateClosed, bool rightGat
     return false;
 }
 
+// Computes a shortest path on the room graph while respecting blocked office edges.
 std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst,
                                  int officeId, bool leftGateClosed, bool rightGateClosed) {
     if (src < 0 || src >= (int)rooms.size() || dst < 0 || dst >= (int)rooms.size())
@@ -54,6 +56,7 @@ std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int ds
     return path;
 }
 
+// Computes shortest-path distances from one source room to every reachable room.
 std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
                                 int officeId, bool leftGateClosed, bool rightGateClosed) {
     std::map<int, int> dist;
@@ -80,6 +83,7 @@ std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
     return dist;
 }
 
+// DFS helper shared by articulation-point and bridge detection.
 static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
                   int officeId, bool leftGateClosed, bool rightGateClosed,
                   std::vector<int> &disc, std::vector<int> &low,
@@ -111,6 +115,7 @@ static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
     }
 }
 
+// Finds articulation points that would disconnect parts of the current campus graph.
 std::vector<int> findArticulationPoints(const std::vector<Room> &rooms,
                                         int officeId, bool leftGateClosed, bool rightGateClosed) {
     int n = rooms.size();
@@ -130,6 +135,7 @@ std::vector<int> findArticulationPoints(const std::vector<Room> &rooms,
     return result;
 }
 
+// Finds bridge edges whose removal would disconnect part of the current graph.
 std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
                                              int officeId, bool leftGateClosed, bool rightGateClosed) {
     int n = rooms.size();
@@ -146,6 +152,7 @@ std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
     return bridges;
 }
 
+// Diffuses one step of enemy-location probability mass across legal graph edges.
 void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap,
                         int officeId, bool leftGateClosed, bool rightGateClosed) {
     std::map<int, double> next;
@@ -175,6 +182,8 @@ void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &p
     probMap = next;
 }
 
+// Combines office distance, current probability, and last-known proximity into
+// a coarse danger score per room.
 std::map<int, double> computeDangerLevels(const std::vector<Room> &rooms,
                                            int officeId,
                                            int enemyLastKnown,

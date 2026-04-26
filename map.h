@@ -13,7 +13,7 @@ struct Room {
     std::vector<int> neighbors;
     bool isCamera;
     bool isOffice;
-    int cameraGroup; // 0=Upper, 1=Central, 2=Lower, -1=none
+    int cameraGroup; // primary/default camera group, -1=none
 };
 
 struct GameMap {
@@ -30,10 +30,13 @@ GameMap buildMap(Difficulty diff);
 std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown);
 
 // Get camera group label.
-std::string cameraGroupLabel(int group);
+std::string cameraGroupLabel(const GameMap &map, int group);
 
 // Get all rooms in a camera group.
 std::vector<int> roomsInGroup(const GameMap &map, int group);
+
+// Check whether a room belongs to a camera group.
+bool roomInCameraGroup(const GameMap &map, int roomId, int group);
 
 // Find a random room far from the office for enemy spawn.
 int findSpawnRoom(const GameMap &map);

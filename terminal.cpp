@@ -53,6 +53,7 @@ Key getKey() {
     if (c == '2') return KEY_2;
     if (c == '3') return KEY_3;
     if (c == '4') return KEY_4;
+    if (c == '5') return KEY_5;
     if (c == '.') return KEY_DOT;
     if (c == '?') return KEY_QUESTION;
 

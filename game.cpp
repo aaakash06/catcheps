@@ -1,34 +1,69 @@
 #include "game.h"
 #include "graph_algos.h"
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <sstream>
 
-static bool isInnerRingApproachRoom(int roomId) {
-    return roomId == 3 || roomId == 4;
+static std::string toLowerCopy(const std::string &text) {
+    std::string lowered = text;
+    for (size_t i = 0; i < lowered.size(); i++)
+        lowered[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(lowered[i])));
+    return lowered;
 }
 
-static bool isActiveCameraBroken(const GameState &gs) {
-    return gs.activeCameraGroup >= 0 &&
-           gs.brokenCameraGroup == gs.activeCameraGroup &&
-           gs.brokenCameraTurns > 0;
+static int primaryClusterForRoom(const GameMap &map, int roomId) {
+    for (int group = 0; group < map.numCameraGroups; group++) {
+        if (roomInCameraGroup(map, roomId, group))
+            return group;
+    }
+    return -1;
 }
 
-static bool canSeeEnemyLive(const GameState &gs) {
-    if (gs.activeCameraGroup < 0) return false;
-    if (isActiveCameraBroken(gs)) return false;
-    if (gs.enemy.currentRoom < 0 || gs.enemy.currentRoom >= gs.gameMap.totalRooms) return false;
-    return gs.gameMap.rooms[gs.enemy.currentRoom].cameraGroup == gs.activeCameraGroup;
+static int enemyDistanceToOffice(const GameState &gs) {
+    auto dist = bfsDistances(gs.gameMap.rooms, gs.gameMap.officeId,
+                             gs.gameMap.officeId,
+                             gs.leftGateClosed, gs.rightGateClosed);
+    if (!dist.count(gs.enemy.currentRoom))
+        return 999;
+    return dist[gs.enemy.currentRoom];
 }
 
-GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(5),
-    turn(0), maxTurns(30), power(100), maxPower(100),
-    cameraPowerCost(3), lurePowerCost(8), doorPowerCost(5), scanPowerCost(10),
-    lureCooldown(0), lureCooldownMax(2), currentLureCooldown(0),
-    leftGateClosed(false), rightGateClosed(false),
-    activeCameraGroup(2), brokenCameraGroup(-1), brokenCameraTurns(0), lastBrokenCameraGroup(-1),
-    lastKnownEnemyRoom(-1), lastCameraGroupChecked(-1), lastCameraFeedUnavailable(false),
-    status(STATUS_PLAYING) {}
+static int audioHintChance(const GameState &gs, int distance) {
+    if (distance == 3) return gs.audioProbDistance3;
+    if (distance == 2) return gs.audioProbDistance2;
+    if (distance == 1) return gs.audioProbDistance1;
+    return 0;
+}
 
+static std::string audioHintText(const GameState &gs, int roomId, int distance) {
+    if (distance <= 1) {
+        if (gs.difficulty == EASY)
+            return "You hear urgent footsteps near the office entrances...";
+        if (gs.difficulty == NORMAL)
+            return "You hear something close to the inner campus...";
+        return "Something is very close to the office...";
+    }
+
+    int group = primaryClusterForRoom(gs.gameMap, roomId);
+    std::string label = (group >= 0) ? cameraGroupLabel(gs.gameMap, group) : "campus";
+
+    if (gs.difficulty == EASY)
+        return "You hear footsteps somewhere near the " + label + "...";
+    if (gs.difficulty == NORMAL)
+        return "You hear a faint sound from the " + toLowerCopy(label) + "...";
+    return "Something echoes in the distance...";
+}
+
+static void maybeGenerateAudioHint(GameState &gs) {
+    int distance = enemyDistanceToOffice(gs);
+    int chance = audioHintChance(gs, distance);
+    if (chance <= 0) return;
+    if ((std::rand() % 100) >= chance) return;
+    gs.eventLog.push_back(audioHintText(gs, gs.enemy.currentRoom, distance));
+}
+
+// Returns whether a movement edge is blocked by one of the two office gates.
 bool isBlockedEdge(const GameState& gs, int from, int to) {
     const int MB = gs.gameMap.officeId;
     const int KAD = 3;
@@ -43,38 +78,96 @@ bool isBlockedEdge(const GameState& gs, int from, int to) {
     return false;
 }
 
+// Applies the mode-specific energy costs, signal decay, audio reliability, and
+// weighted enemy movement profile.
 void setDifficultyParams(GameState &gs, Difficulty diff) {
     gs.difficulty = diff;
+    gs.maxPower = 100;
+
     if (diff == EASY) {
         gs.totalNights = 3;
-        gs.maxPower = 150;
         gs.maxTurns = 30;
-        gs.cameraPowerCost = 3;
-        gs.lurePowerCost = 8;
-        gs.doorPowerCost = 5;
-        gs.scanPowerCost = 10;
+        gs.cameraPowerCost = 1;
+        gs.deepScanPowerCost = 3;
+        gs.lurePowerCost = 3;
+        gs.doorPowerCost = 1;
+        gs.scanPowerCost = 5;
+        gs.signalDecayTurns = 3;
+        gs.audioProbDistance3 = 25;
+        gs.audioProbDistance2 = 40;
+        gs.audioProbDistance1 = 65;
+        gs.moveCloserProb = 55;
+        gs.moveSidewaysProb = 30;
+        gs.moveRandomProb = 15;
         gs.lureCooldownMax = 2;
     } else if (diff == NORMAL) {
         gs.totalNights = 4;
-        gs.maxPower = 120;
         gs.maxTurns = 35;
-        gs.cameraPowerCost = 5;
-        gs.lurePowerCost = 12;
-        gs.doorPowerCost = 8;
-        gs.scanPowerCost = 15;
+        gs.cameraPowerCost = 2;
+        gs.deepScanPowerCost = 5;
+        gs.lurePowerCost = 4;
+        gs.doorPowerCost = 1;
+        gs.scanPowerCost = 7;
+        gs.signalDecayTurns = 2;
+        gs.audioProbDistance3 = 20;
+        gs.audioProbDistance2 = 35;
+        gs.audioProbDistance1 = 60;
+        gs.moveCloserProb = 65;
+        gs.moveSidewaysProb = 25;
+        gs.moveRandomProb = 10;
         gs.lureCooldownMax = 3;
     } else {
         gs.totalNights = 5;
-        gs.maxPower = 100;
         gs.maxTurns = 40;
-        gs.cameraPowerCost = 7;
-        gs.lurePowerCost = 15;
-        gs.doorPowerCost = 10;
-        gs.scanPowerCost = 18;
+        gs.cameraPowerCost = 3;
+        gs.deepScanPowerCost = 6;
+        gs.lurePowerCost = 5;
+        gs.doorPowerCost = 2;
+        gs.scanPowerCost = 9;
+        gs.signalDecayTurns = 1;
+        gs.audioProbDistance3 = 10;
+        gs.audioProbDistance2 = 25;
+        gs.audioProbDistance1 = 45;
+        gs.moveCloserProb = 85;
+        gs.moveSidewaysProb = 15;
+        gs.moveRandomProb = 0;
         gs.lureCooldownMax = 4;
     }
 }
 
+SignalStrength getSignalStrength(const GameState &gs) {
+    if (gs.lastKnownEnemyRoom < 0 || gs.lastKnownEnemyRoom >= gs.gameMap.totalRooms)
+        return SIGNAL_NONE;
+
+    int age = gs.turn - gs.lastKnownEnemyTurn;
+    if (age < 0) return SIGNAL_NONE;
+    if (age == 0) return SIGNAL_STRONG;
+    if (age < gs.signalDecayTurns) return SIGNAL_WEAK;
+    return SIGNAL_NONE;
+}
+
+std::string getSignalDisplay(const GameState &gs) {
+    SignalStrength strength = getSignalStrength(gs);
+    if (strength == SIGNAL_NONE)
+        return "No reliable signal.";
+
+    std::stringstream ss;
+    ss << gs.gameMap.rooms[gs.lastKnownEnemyRoom].abbrev << " "
+       << (strength == SIGNAL_STRONG ? "[!!]" : "[?]");
+    return ss.str();
+}
+
+GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(3),
+    turn(0), maxTurns(30), power(100), maxPower(100),
+    cameraPowerCost(1), deepScanPowerCost(3), lurePowerCost(3), doorPowerCost(1), scanPowerCost(5),
+    signalDecayTurns(3), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
+    moveCloserProb(55), moveSidewaysProb(30), moveRandomProb(15),
+    lureCooldownMax(2), currentLureCooldown(0),
+    leftGateClosed(false), rightGateClosed(false),
+    lastKnownEnemyRoom(-1), lastKnownEnemyTurn(-9999),
+    status(STATUS_PLAYING) {}
+
+// Builds a fresh game state for the selected difficulty and starts Night 1.
 void GameState::init(Difficulty diff) {
     setDifficultyParams(*this, diff);
     gameMap = buildMap(diff);
@@ -83,35 +176,28 @@ void GameState::init(Difficulty diff) {
     status = STATUS_PLAYING;
     statusMessage = "";
     eventLog.clear();
-
-    // Initialize probability map (uniform)
-    probMap.clear();
-    for (size_t i = 0; i < gameMap.rooms.size(); i++)
-        probMap[i] = 1.0 / gameMap.totalRooms;
-
     newNight();
 }
 
-void GameState::newNight() {
+// Resets transient night state while optionally preserving earlier log entries
+// such as the "6 AM reached" transition message.
+void GameState::newNight(bool preserveEventLog) {
+    if (!preserveEventLog)
+        eventLog.clear();
+
     turn = 0;
     int spawn = findSpawnRoom(gameMap);
     enemy.init(spawn, difficulty);
-    activeCameraGroup = (gameMap.numCameraGroups > 2) ? 2 : gameMap.numCameraGroups - 1;
-    brokenCameraGroup = -1;
-    brokenCameraTurns = 0;
-    lastBrokenCameraGroup = -1;
     lastKnownEnemyRoom = -1;
-    lastCameraCheck.clear();
-    lastCameraGroupChecked = -1;
-    lastCameraFeedUnavailable = false;
+    lastKnownEnemyTurn = -9999;
+    lastScanOutput.clear();
     currentLureCooldown = 0;
     leftGateClosed = false;
     rightGateClosed = false;
 
-    // Reset probability
     probMap.clear();
     for (size_t i = 0; i < gameMap.rooms.size(); i++)
-        probMap[i] = 1.0 / gameMap.totalRooms;
+        probMap[(int)i] = 1.0 / gameMap.totalRooms;
 
     std::stringstream ss;
     ss << "--- Night " << currentNight << " begins ---";
@@ -120,25 +206,27 @@ void GameState::newNight() {
     statusMessage = "";
 }
 
+// Processes one player action, then resolves enemy movement, audio hints,
+// resource upkeep, win/loss checks, and probability updates for that turn.
 void GameState::doTurn(int action, int param) {
     if (status != STATUS_PLAYING) return;
 
     turn++;
     eventLog.clear();
-    lastCameraCheck.clear();
-    lastCameraFeedUnavailable = false;
+    lastScanOutput.clear();
     bool drainPowerThisTurn = true;
 
     switch (action) {
-        case 1: checkCamera(param); break;
-        case 2: playLure(param); break;
+        case 1: quickSweep(param); break;
+        case 2: deepScan(param); break;
         case 3: toggleGate(param); break;
-        case 4: openGate(param); break;
-        case 5: riskScan(); break;
-        case 6: // end turn, no action
-            eventLog.push_back("You wait...");
+        case 4: playLure(param); break;
+        case 5:
+            eventLog.push_back("You wait and listen...");
             drainPowerThisTurn = false;
             break;
+        case 6: openGate(param); break;
+        case 7: riskScan(); break;
         default:
             eventLog.push_back("Invalid action.");
             turn--;
@@ -147,54 +235,22 @@ void GameState::doTurn(int action, int param) {
 
     if (status != STATUS_PLAYING) return;
 
-    // Cooldowns
     if (currentLureCooldown > 0) currentLureCooldown--;
 
-    // Enemy moves
     enemyTurn();
-
-    if (canSeeEnemyLive(*this))
-        lastKnownEnemyRoom = enemy.currentRoom;
-
-    bool outageRestoredThisTurn = false;
-    if (brokenCameraTurns > 0) {
-        brokenCameraTurns--;
-        if (brokenCameraTurns == 0) {
-            eventLog.push_back(cameraGroupLabel(brokenCameraGroup) + " cameras restored.");
-            brokenCameraGroup = -1;
-            outageRestoredThisTurn = true;
-        }
-    }
+    maybeGenerateAudioHint(*this);
 
     if (drainPowerThisTurn) {
-        // Passive power drain
-        int drain = 1 + currentNight / 2;
-        power -= drain;
+        if (leftGateClosed) power -= doorPowerCost;
+        if (rightGateClosed) power -= doorPowerCost;
         if (power < 0) power = 0;
-
-        if (leftGateClosed) power -= 1;
-        if (rightGateClosed) power -= 1;
-        if (power < 0) power = 0;
-    }
-
-    if (difficulty == EASY && activeCameraGroup >= 0 && brokenCameraTurns == 0 &&
-        !outageRestoredThisTurn && turn > 2) {
-        bool canBreakActiveRing = true;
-        if (activeCameraGroup == 0 && isInnerRingApproachRoom(enemy.currentRoom))
-            canBreakActiveRing = false;
-
-        if (canBreakActiveRing && (std::rand() % 100) < 10) {
-            brokenCameraGroup = activeCameraGroup;
-            brokenCameraTurns = 1;
-            lastBrokenCameraGroup = activeCameraGroup;
-            eventLog.push_back("Warning: " + cameraGroupLabel(activeCameraGroup) + " cameras offline!");
-        }
     }
 
     checkConditions();
     updateProbMap();
 }
 
+// Advances the enemy exactly once for the turn and records a compact hidden-state log entry.
 void GameState::enemyTurn() {
     enemy.tickLure();
     enemy.move(*this);
@@ -208,22 +264,23 @@ void GameState::enemyTurn() {
     eventLog.push_back(ss.str());
 }
 
+// Updates win/loss state after the player action, enemy move, and resource systems resolve.
 void GameState::checkConditions() {
     if (enemy.currentRoom == gameMap.officeId) {
         status = STATUS_LOSE_ENEMY;
-        statusMessage = "The enemy has reached the office! GAME OVER.";
+        statusMessage = "The intruder reached Main Building. GAME OVER.";
         return;
     }
     if (power <= 0) {
         status = STATUS_LOSE_POWER;
-        statusMessage = "Power depleted! You cannot monitor the building. GAME OVER.";
+        statusMessage = "Energy depleted. The campus defense systems shut down.";
         return;
     }
     if (turn >= maxTurns) {
         if (currentNight < totalNights) {
             currentNight++;
             eventLog.push_back("*** 6 AM reached! You survived the night! ***");
-            newNight();
+            newNight(true);
         } else {
             status = STATUS_WIN;
             statusMessage = "You survived all nights! YOU WIN!";
@@ -231,57 +288,70 @@ void GameState::checkConditions() {
     }
 }
 
-void GameState::checkCamera(int group) {
-    if (power < cameraPowerCost) {
-        eventLog.push_back("Not enough power for camera check!");
+// Performs a cheap cluster-level scan that only reports whether any movement is present.
+void GameState::quickSweep(int group) {
+    if (group < 0 || group >= gameMap.numCameraGroups) {
+        eventLog.push_back("Invalid camera cluster.");
         turn--;
         return;
     }
-    power -= cameraPowerCost;
-    activeCameraGroup = group;
-    lastCameraGroupChecked = group;
-    eventLog.push_back("Now watching: " + cameraGroupLabel(group));
-
-    if (isActiveCameraBroken(*this)) {
-        lastCameraFeedUnavailable = true;
-        eventLog.push_back(cameraGroupLabel(group) + " camera feed unavailable.");
-
-        std::stringstream ss;
-        ss << "Checked Camera " << cameraGroupLabel(group) << " (-" << cameraPowerCost << " power)";
-        eventLog.push_back(ss.str());
+    if (power < cameraPowerCost) {
+        eventLog.push_back("Not enough energy for Quick Sweep!");
+        turn--;
         return;
     }
 
+    power -= cameraPowerCost;
+    std::string label = cameraGroupLabel(gameMap, group);
     auto roomIds = roomsInGroup(gameMap, group);
-    for (int rid : roomIds) {
-        CameraSighting cs;
-        cs.roomId = rid;
+    bool movementDetected = std::find(roomIds.begin(), roomIds.end(), enemy.currentRoom) != roomIds.end();
 
-        bool detected = (enemy.currentRoom == rid);
-        // On harder difficulties, chance to miss detection
-        if (detected && difficulty == NORMAL && (std::rand() % 100) < 10)
-            detected = false;
-        if (detected && difficulty == HARD && (std::rand() % 100) < 20)
-            detected = false;
-
-        cs.enemyPresent = detected;
-        if (detected) {
-            cs.status = "ENEMY DETECTED!";
-            lastKnownEnemyRoom = rid;
-            eventLog.push_back("Camera " + cameraGroupLabel(group) +
-                ": Enemy spotted in " + gameMap.rooms[rid].name + "!");
-        } else {
-            cs.status = "Clear";
-        }
-        lastCameraCheck.push_back(cs);
-    }
+    lastScanOutput.push_back("QUICK SWEEP - " + label);
+    if (movementDetected)
+        lastScanOutput.push_back("Movement detected in " + label + ".");
+    else
+        lastScanOutput.push_back("No movement detected in " + label + ".");
 
     std::stringstream ss;
-    ss << "Checked Camera " << cameraGroupLabel(group) << " (-" << cameraPowerCost << " power)";
+    ss << "Quick Sweep on " << label << " (-" << cameraPowerCost << "% energy)";
     eventLog.push_back(ss.str());
 }
 
+// Performs a precise room scan that can reveal the enemy's exact location for signal memory.
+void GameState::deepScan(int roomId) {
+    if (roomId < 0 || roomId >= gameMap.totalRooms || roomId == gameMap.officeId) {
+        eventLog.push_back("Deep Scan requires a non-office building target.");
+        turn--;
+        return;
+    }
+    if (power < deepScanPowerCost) {
+        eventLog.push_back("Not enough energy for Deep Scan!");
+        turn--;
+        return;
+    }
+
+    power -= deepScanPowerCost;
+    std::string label = gameMap.rooms[roomId].abbrev;
+    lastScanOutput.push_back("DEEP SCAN - " + label);
+
+    if (enemy.currentRoom == roomId) {
+        lastKnownEnemyRoom = roomId;
+        lastKnownEnemyTurn = turn;
+        lastScanOutput.push_back("Enemy detected at " + label + ".");
+        eventLog.push_back("Deep Scan confirmed the intruder at " + gameMap.rooms[roomId].name + ".");
+    } else {
+        lastScanOutput.push_back("No movement detected at " + label + ".");
+        eventLog.push_back("Deep Scan found no movement at " + gameMap.rooms[roomId].name + ".");
+    }
+}
+
+// Plays a sound lure in one camera cluster to bias the enemy toward a random room there.
 void GameState::playLure(int group) {
+    if (group < 0 || group >= gameMap.numCameraGroups) {
+        eventLog.push_back("Invalid lure target cluster.");
+        turn--;
+        return;
+    }
     if (currentLureCooldown > 0) {
         std::stringstream ss;
         ss << "Lure on cooldown! " << currentLureCooldown << " turns remaining.";
@@ -290,30 +360,35 @@ void GameState::playLure(int group) {
         return;
     }
     if (power < lurePowerCost) {
-        eventLog.push_back("Not enough power for lure!");
+        eventLog.push_back("Not enough energy for lure!");
         turn--;
         return;
     }
+
+    auto roomIds = roomsInGroup(gameMap, group);
+    if (roomIds.empty()) {
+        eventLog.push_back("That cluster has no valid lure target.");
+        turn--;
+        return;
+    }
+
     power -= lurePowerCost;
     currentLureCooldown = lureCooldownMax;
 
-    // Pick a random camera room in the group as the lure target
-    auto roomIds = roomsInGroup(gameMap, group);
     int target = roomIds[std::rand() % roomIds.size()];
-
     int duration = (difficulty == EASY) ? 4 : (difficulty == NORMAL) ? 3 : 2;
     enemy.applyLure(target, duration);
 
     std::stringstream ss;
-    ss << "Played sound at Camera " << cameraGroupLabel(group)
-       << " (" << gameMap.rooms[target].name << ") (-" << lurePowerCost << " power)";
+    ss << "Lure used in " << cameraGroupLabel(gameMap, group)
+       << " (-" << lurePowerCost << "% energy)";
     eventLog.push_back(ss.str());
-    eventLog.push_back("Enemy is now investigating the sound!");
 }
 
+// Toggles one of the two office gates when the cursor is on KAD or KNOW.
 void GameState::toggleGate(int roomId) {
     if (roomId < 0 || roomId >= gameMap.totalRooms) {
-        eventLog.push_back("Invalid room!");
+        eventLog.push_back("Invalid room.");
         turn--;
         return;
     }
@@ -327,29 +402,19 @@ void GameState::toggleGate(int roomId) {
         gate = &leftGateClosed;
         gateLabel = "KNOW office gate";
     } else {
-        eventLog.push_back("Only office entrance gates can be controlled.");
+        eventLog.push_back("Only KAD and KNOW can be defended directly.");
         turn--;
         return;
     }
 
-    if (!*gate && power < doorPowerCost) {
-        eventLog.push_back("Not enough power!");
-        turn--;
-        return;
-    }
-
-    if (!*gate) power -= doorPowerCost;
     *gate = !*gate;
-
-    std::stringstream ss;
-    ss << gateLabel << ' ' << (*gate ? "closed" : "opened");
-    if (*gate) ss << " (-" << doorPowerCost << " power)";
-    eventLog.push_back(ss.str());
+    eventLog.push_back(gateLabel + (*gate ? " closed." : " opened."));
 }
 
+// Opens one office gate explicitly without spending energy.
 void GameState::openGate(int roomId) {
     if (roomId < 0 || roomId >= gameMap.totalRooms) {
-        eventLog.push_back("Invalid room!");
+        eventLog.push_back("Invalid room.");
         turn--;
         return;
     }
@@ -363,7 +428,7 @@ void GameState::openGate(int roomId) {
         gate = &leftGateClosed;
         gateLabel = "KNOW office gate";
     } else {
-        eventLog.push_back("Only office entrance gates can be controlled.");
+        eventLog.push_back("Only KAD and KNOW can be defended directly.");
         turn--;
         return;
     }
@@ -378,9 +443,10 @@ void GameState::openGate(int roomId) {
     eventLog.push_back(gateLabel + " opened.");
 }
 
+// Runs the optional graph-analysis report used by the strategic risk scan action.
 void GameState::riskScan() {
     if (power < scanPowerCost) {
-        eventLog.push_back("Not enough power for risk scan!");
+        eventLog.push_back("Not enough energy for risk scan!");
         turn--;
         return;
     }
@@ -406,11 +472,12 @@ void GameState::riskScan() {
                 " <-> " + gameMap.rooms[b.second].name);
     }
 
-    auto path = bfsShortestPath(gameMap.rooms, enemy.currentRoom, gameMap.officeId,
+    int scanSource = (lastKnownEnemyRoom >= 0) ? lastKnownEnemyRoom : enemy.currentRoom;
+    auto path = bfsShortestPath(gameMap.rooms, scanSource, gameMap.officeId,
                                 gameMap.officeId, leftGateClosed, rightGateClosed);
     if (!path.empty()) {
         std::stringstream ss;
-        ss << "Shortest path from last known to office: " << path.size() - 1 << " steps";
+        ss << "Shortest known path to office: " << path.size() - 1 << " steps";
         eventLog.push_back(ss.str());
     }
 
@@ -430,24 +497,26 @@ void GameState::riskScan() {
     }
 
     std::stringstream ss;
-    ss << "(-" << scanPowerCost << " power)";
+    ss << "Risk scan complete (-" << scanPowerCost << "% energy)";
     eventLog.push_back(ss.str());
 }
 
+// Rebuilds the coarse enemy probability map from the last reliable signal and
+// one diffusion step through the current graph.
 void GameState::updateProbMap() {
-    // If we know enemy location, spike that room
-    if (lastKnownEnemyRoom >= 0) {
+    if (getSignalStrength(*this) != SIGNAL_NONE && lastKnownEnemyRoom >= 0) {
         for (auto &p : probMap)
             p.second = 0.01;
         probMap[lastKnownEnemyRoom] = 0.5;
-        // Diffuse remaining to neighbors
-        auto &neighbors = gameMap.rooms[lastKnownEnemyRoom].neighbors;
+
+        const std::vector<int> &neighbors = gameMap.rooms[lastKnownEnemyRoom].neighbors;
         double spread = 0.5 / (neighbors.size() + 1);
         for (int nb : neighbors)
             if (!isBlockedEdge(*this, lastKnownEnemyRoom, nb))
                 probMap[nb] += spread;
         probMap[lastKnownEnemyRoom] += spread;
     }
+
     diffuseProbability(gameMap.rooms, probMap, gameMap.officeId,
                        leftGateClosed, rightGateClosed);
 }

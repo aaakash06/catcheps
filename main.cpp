@@ -13,11 +13,11 @@
 
 static int selectCameraGroup(GameState &gs) {
     // Show groups and wait for key selection
-    std::cout << "\n  Select camera ring:\n";
+    std::cout << "\n  Select camera cluster:\n";
     for (int i = 0; i < gs.gameMap.numCameraGroups; i++) {
         auto roomIds = roomsInGroup(gs.gameMap, i);
         std::cout << "  " << CLR_CYAN << "[" << (i+1) << "]" << CLR_RESET
-                  << " " << cameraGroupLabel(i) << " (";
+                  << " " << cameraGroupLabel(gs.gameMap, i) << " (";
         for (size_t j = 0; j < roomIds.size(); j++) {
             if (j > 0) std::cout << ",";
             std::cout << gs.gameMap.rooms[roomIds[j]].abbrev;
@@ -32,6 +32,7 @@ static int selectCameraGroup(GameState &gs) {
         if (k == KEY_1 && gs.gameMap.numCameraGroups >= 1) return 0;
         if (k == KEY_2 && gs.gameMap.numCameraGroups >= 2) return 1;
         if (k == KEY_3 && gs.gameMap.numCameraGroups >= 3) return 2;
+        if (k == KEY_4 && gs.gameMap.numCameraGroups >= 4) return 3;
         if (k == KEY_0 || k == KEY_ESCAPE) return -1;
     }
 }
@@ -64,27 +65,30 @@ static void runGameLoop(GameState &gs) {
 
         // Actions
         if (k == KEY_C) {
-            // Camera check
+            // Quick Sweep
             int group = selectCameraGroup(gs);
             if (group >= 0)
                 gs.doTurn(1, group);
-        } else if (k == KEY_L) {
+        } else if (k == KEY_2 || k == KEY_S) {
+            // Deep Scan current room
+            gs.doTurn(2, cursorRoom);
+        } else if (k == KEY_4 || k == KEY_L) {
             // Lure
             int group = selectCameraGroup(gs);
             if (group >= 0)
-                gs.doTurn(2, group);
-        } else if (k == KEY_D) {
-            // Close door at cursor
+                gs.doTurn(4, group);
+        } else if (k == KEY_3 || k == KEY_D) {
+            // Toggle gate at cursor
             gs.doTurn(3, cursorRoom);
         } else if (k == KEY_R) {
-            // Restore door at cursor
-            gs.doTurn(4, cursorRoom);
-        } else if (k == KEY_S) {
+            // Open gate at cursor
+            gs.doTurn(6, cursorRoom);
+        } else if (k == KEY_A) {
             // Risk scan
+            gs.doTurn(7, -1);
+        } else if (k == KEY_5 || k == KEY_E || k == KEY_DOT || k == KEY_SPACE) {
+            // End turn (wait / listen)
             gs.doTurn(5, -1);
-        } else if (k == KEY_E || k == KEY_DOT || k == KEY_SPACE) {
-            // End turn (wait)
-            gs.doTurn(6, -1);
         } else if (k == KEY_Q) {
             // Save & quit
             restoreTerminal();
@@ -98,7 +102,7 @@ static void runGameLoop(GameState &gs) {
             // Help overlay
             drawHelp();
         } else if (k == KEY_ENTER) {
-            // Enter on a building — close door action
+            // Enter on a building — toggle gate action
             gs.doTurn(3, cursorRoom);
         }
     }

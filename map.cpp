@@ -37,7 +37,7 @@ GameMap buildMap(Difficulty diff) {
 
     gm.totalRooms = n;
     gm.officeId = 0; // MB is always the office
-    gm.numCameraGroups = 3;
+    gm.numCameraGroups = 4;
 
     gm.rooms.resize(n);
     for (int i = 0; i < n; i++) {
@@ -48,11 +48,9 @@ GameMap buildMap(Difficulty diff) {
         gm.rooms[i].isCamera = true;
     }
 
-    // Camera groups:
-    // 0=Inner Ring: KAD(3), KNOW(4)
-    // 1=Middle Ring: LIB(2), HC(6)
-    // 2=Outer Ring: KKL(1), CYM(5), HW(7), MW(8), RM(9), RHS(10), RR(11), JL(12)
-    // MB(0) is excluded from camera groups.
+    // Primary/default camera groups.
+    // Normal mode uses overlapping helper-based groups below, so these are only
+    // a fallback / default assignment.
     int groups13[] = {-1, 2, 1, 0, 0, 2, 1, 2, 2, 2, 2, 2, 2};
     for (int i = 0; i < n; i++)
         gm.rooms[i].cameraGroup = groups13[i];
@@ -110,17 +108,79 @@ std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown) {
     return "[ ]";
 }
 
-std::string cameraGroupLabel(int group) {
+std::string cameraGroupLabel(const GameMap &map, int group) {
+    if (map.totalRooms == 8) {
+        if (group == 0) return "West";
+        if (group == 1) return "East";
+        if (group == 2) return "Nexus";
+        if (group == 3) return "Threshold";
+        return "?";
+    }
+
+    if (map.totalRooms == 10) {
+        if (group == 0) return "North Link";
+        if (group == 1) return "West Flank";
+        if (group == 2) return "East Corridor";
+        if (group == 3) return "Doorstep";
+        return "?";
+    }
+
+    if (map.totalRooms == 13) {
+        if (group == 0) return "Upper Perimeter";
+        if (group == 1) return "Central Hubs";
+        if (group == 2) return "West Access";
+        if (group == 3) return "East Access";
+        return "?";
+    }
+
     if (group == 0) return "Inner Ring";
     if (group == 1) return "Middle Ring";
     if (group == 2) return "Outer Ring";
     return "?";
 }
 
+bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
+    if (roomId < 0 || roomId >= map.totalRooms) return false;
+
+    if (roomId == map.officeId) return false;
+
+    // Overlapping strategic camera groups for EASY mode.
+    if (map.totalRooms == 8) {
+        if (group == 0) return roomId == 1 || roomId == 2 || roomId == 4;      // KKL, LIB, KNOW
+        if (group == 1) return roomId == 7 || roomId == 5 || roomId == 6 ||
+                               roomId == 3;                                     // HW, CYM, HC, KAD
+        if (group == 2) return roomId == 2 || roomId == 6;                       // LIB, HC
+        if (group == 3) return roomId == 4 || roomId == 3;                       // KNOW, KAD
+        return false;
+    }
+
+    // Overlapping strategic camera groups for NORMAL mode.
+    if (map.totalRooms == 10) {
+        if (group == 0) return roomId == 8 || roomId == 5 || roomId == 9; // MW, CYM, RM
+        if (group == 1) return roomId == 9 || roomId == 2 || roomId == 1; // RM, LIB, KKL
+        if (group == 2) return roomId == 5 || roomId == 7 || roomId == 6; // CYM, HW, HC
+        if (group == 3) return roomId == 4 || roomId == 3;                 // KNOW, KAD
+        return false;
+    }
+
+    // Overlapping strategic camera groups for HARD mode.
+    if (map.totalRooms == 13) {
+        if (group == 0) return roomId == 8 || roomId == 10 || roomId == 12 ||
+                               roomId == 7 || roomId == 11;                 // MW, RHS, JL, HW, RR
+        if (group == 1) return roomId == 5 || roomId == 6 || roomId == 2 ||
+                               roomId == 1;                                  // CYM, HC, LIB, KKL
+        if (group == 2) return roomId == 7 || roomId == 6 || roomId == 3;   // HW, HC, KAD
+        if (group == 3) return roomId == 9 || roomId == 4;                   // RM, KNOW
+        return false;
+    }
+
+    return map.rooms[roomId].cameraGroup == group;
+}
+
 std::vector<int> roomsInGroup(const GameMap &map, int group) {
     std::vector<int> result;
     for (auto &r : map.rooms)
-        if (r.cameraGroup == group)
+        if (roomInCameraGroup(map, r.id, group))
             result.push_back(r.id);
     return result;
 }
