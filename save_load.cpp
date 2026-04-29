@@ -3,11 +3,19 @@
 #include <limits>
 #include <sstream>
 
-static const char *SAVE_MAGIC = "CW_SAVE_V2";
+static const char *SAVE_MAGIC = "CW_SAVE_V3";
+static const char *SAVE_MAGIC_V2 = "CW_SAVE_V2";
 
 template <typename T>
 static bool readValue(std::istream &in, T &value) {
     return static_cast<bool>(in >> value);
+}
+
+static bool failLoad(GameState &gs, const std::string &message) {
+    gs.statusMessage = message;
+    gs.eventLog.clear();
+    gs.eventLog.push_back(message);
+    return false;
 }
 
 // Saves the current game state to a plain-text file that can be reloaded later.
@@ -26,7 +34,8 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.cameraPowerCost << "\n";
     out << gs.deepScanPowerCost << "\n";
     out << gs.lurePowerCost << "\n";
-    out << gs.doorPowerCost << "\n";
+    out << gs.gateClosePowerCost << "\n";
+    out << gs.gateUpkeepPowerCost << "\n";
     out << gs.signalDecayTurns << "\n";
     out << gs.audioProbDistance3 << "\n";
     out << gs.audioProbDistance2 << "\n";
@@ -35,6 +44,8 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.moveSidewaysProb << "\n";
     out << gs.moveRandomProb << "\n";
     out << gs.lureCooldownMax << "\n";
+    out << gs.lureDurationTurns << "\n";
+    out << gs.lureWeightMultiplier << "\n";
     out << gs.currentLureCooldown << "\n";
     out << gs.lastKnownEnemyRoom << "\n";
     out << gs.lastKnownEnemyTurn << "\n";
@@ -47,7 +58,7 @@ bool saveGame(const GameState &gs, const std::string &filename) {
 
     out << gs.gameMap.totalRooms << "\n";
     out << gs.gameMap.officeId << "\n";
-    out << gs.gameMap.numCameraGroups << "\n";
+    out << effectiveCameraGroupCount(gs.gameMap) << "\n";
     out << gs.leftGateClosed << " " << gs.rightGateClosed << "\n";
 
     for (size_t i = 0; i < gs.gameMap.rooms.size(); i++) {
@@ -78,49 +89,142 @@ bool loadGame(GameState &gs, const std::string &filename) {
     if (!(in >> firstToken)) return false;
 
     bool legacyFormat = false;
+    bool version2Format = false;
     int diffInt = -1;
     if (firstToken == SAVE_MAGIC) {
         if (!readValue(in, diffInt)) return false;
+    } else if (firstToken == SAVE_MAGIC_V2) {
+        if (!readValue(in, diffInt)) return false;
+        version2Format = true;
     } else {
         std::istringstream ss(firstToken);
         if (!(ss >> diffInt) || !ss.eof()) return false;
         legacyFormat = true;
     }
 
-    if (diffInt < EASY || diffInt > HARD) return false;
+    if (diffInt < EASY || diffInt > HARD) return failLoad(gs, "Save rejected: invalid difficulty.");
     gs.difficulty = static_cast<Difficulty>(diffInt);
+    setDifficultyParams(gs, gs.difficulty);
+
+    int savedCurrentNight;
+    int savedTotalNights;
+    int savedTurn;
+    int savedMaxTurns;
+    int savedPower;
+    int savedMaxPower;
+
+    int savedCameraCost;
+    int savedDeepScanCost;
+    int savedLureCost;
+    int savedGateCloseCost;
+    int savedGateUpkeepCost = gs.gateUpkeepPowerCost;
+    int savedSignalDecayTurns;
+    int savedAudioProbDistance3;
+    int savedAudioProbDistance2;
+    int savedAudioProbDistance1;
+    int savedMoveCloserProb;
+    int savedMoveSidewaysProb;
+    int savedMoveRandomProb;
+    int savedLureCooldownMax;
+    int savedLureDurationTurns = gs.lureDurationTurns;
+    double savedLureWeightMultiplier = gs.lureWeightMultiplier;
 
     if (!readValue(in, gs.currentNight) ||
         !readValue(in, gs.totalNights) ||
         !readValue(in, gs.turn) ||
         !readValue(in, gs.maxTurns) ||
         !readValue(in, gs.power) ||
-        !readValue(in, gs.maxPower) ||
-        !readValue(in, gs.cameraPowerCost) ||
-        !readValue(in, gs.deepScanPowerCost) ||
-        !readValue(in, gs.lurePowerCost) ||
-        !readValue(in, gs.doorPowerCost)) {
+        !readValue(in, gs.maxPower)) {
         return false;
     }
 
-    if (legacyFormat) {
+    savedCurrentNight = gs.currentNight;
+    savedTotalNights = gs.totalNights;
+    savedTurn = gs.turn;
+    savedMaxTurns = gs.maxTurns;
+    savedPower = gs.power;
+    savedMaxPower = gs.maxPower;
+
+    if (!readValue(in, savedCameraCost) ||
+        !readValue(in, savedDeepScanCost) ||
+        !readValue(in, savedLureCost) ||
+        !readValue(in, savedGateCloseCost)) {
+        return false;
+    }
+
+    if (firstToken == SAVE_MAGIC) {
+        if (!readValue(in, savedGateUpkeepCost))
+            return failLoad(gs, "Save rejected: invalid gate upkeep state.");
+    } else if (legacyFormat) {
         int ignoredScanPowerCost;
         if (!readValue(in, ignoredScanPowerCost))
-            return false;
+            return failLoad(gs, "Save rejected: incomplete legacy save header.");
     }
 
-    if (!readValue(in, gs.signalDecayTurns) ||
-        !readValue(in, gs.audioProbDistance3) ||
-        !readValue(in, gs.audioProbDistance2) ||
-        !readValue(in, gs.audioProbDistance1) ||
-        !readValue(in, gs.moveCloserProb) ||
-        !readValue(in, gs.moveSidewaysProb) ||
-        !readValue(in, gs.moveRandomProb) ||
-        !readValue(in, gs.lureCooldownMax) ||
-        !readValue(in, gs.currentLureCooldown) ||
+    if (!readValue(in, savedSignalDecayTurns) ||
+        !readValue(in, savedAudioProbDistance3) ||
+        !readValue(in, savedAudioProbDistance2) ||
+        !readValue(in, savedAudioProbDistance1) ||
+        !readValue(in, savedMoveCloserProb) ||
+        !readValue(in, savedMoveSidewaysProb) ||
+        !readValue(in, savedMoveRandomProb) ||
+        !readValue(in, savedLureCooldownMax)) {
+        return failLoad(gs, "Save rejected: invalid core tuning values.");
+    }
+
+    if (firstToken == SAVE_MAGIC) {
+        if (!readValue(in, savedLureDurationTurns) ||
+            !readValue(in, savedLureWeightMultiplier)) {
+            return failLoad(gs, "Save rejected: invalid lure tuning values.");
+        }
+    }
+
+    if (!readValue(in, gs.currentLureCooldown) ||
         !readValue(in, gs.lastKnownEnemyRoom) ||
         !readValue(in, gs.lastKnownEnemyTurn)) {
-        return false;
+        return failLoad(gs, "Save rejected: invalid signal memory state.");
+    }
+
+    gs.currentNight = savedCurrentNight;
+    gs.totalNights = savedTotalNights;
+    gs.turn = savedTurn;
+    gs.maxTurns = savedMaxTurns;
+    gs.power = savedPower;
+    gs.maxPower = savedMaxPower;
+
+    if (!legacyFormat && !version2Format) {
+        gs.cameraPowerCost = savedCameraCost;
+        gs.deepScanPowerCost = savedDeepScanCost;
+        gs.lurePowerCost = savedLureCost;
+        gs.gateClosePowerCost = savedGateCloseCost;
+        gs.gateUpkeepPowerCost = savedGateUpkeepCost;
+        gs.signalDecayTurns = savedSignalDecayTurns;
+        gs.audioProbDistance3 = savedAudioProbDistance3;
+        gs.audioProbDistance2 = savedAudioProbDistance2;
+        gs.audioProbDistance1 = savedAudioProbDistance1;
+        gs.moveCloserProb = savedMoveCloserProb;
+        gs.moveSidewaysProb = savedMoveSidewaysProb;
+        gs.moveRandomProb = savedMoveRandomProb;
+        gs.lureCooldownMax = savedLureCooldownMax;
+        gs.lureDurationTurns = savedLureDurationTurns;
+        gs.lureWeightMultiplier = savedLureWeightMultiplier;
+    }
+
+    if (gs.currentNight < 1 || gs.currentNight > gs.totalNights ||
+        gs.turn < 0 || gs.turn > gs.maxTurns ||
+        gs.maxTurns <= 0 || gs.totalNights <= 0 ||
+        gs.power < 0 || gs.power > gs.maxPower || gs.maxPower <= 0 ||
+        gs.cameraPowerCost < 0 || gs.deepScanPowerCost < 0 || gs.lurePowerCost < 0 ||
+        gs.gateClosePowerCost < 0 || gs.gateUpkeepPowerCost < 0 ||
+        gs.signalDecayTurns < 1 ||
+        gs.audioProbDistance3 < 0 || gs.audioProbDistance3 > 100 ||
+        gs.audioProbDistance2 < 0 || gs.audioProbDistance2 > 100 ||
+        gs.audioProbDistance1 < 0 || gs.audioProbDistance1 > 100 ||
+        gs.moveCloserProb < 0 || gs.moveSidewaysProb < 0 || gs.moveRandomProb < 0 ||
+        gs.lureCooldownMax < 0 || gs.lureDurationTurns < 0 ||
+        gs.lureWeightMultiplier <= 0.0 ||
+        gs.currentLureCooldown < 0 || gs.currentLureCooldown > gs.lureCooldownMax) {
+        return failLoad(gs, "Save rejected: invalid difficulty settings.");
     }
 
     int enemyState;
@@ -129,31 +233,31 @@ bool loadGame(GameState &gs, const std::string &filename) {
         !readValue(in, enemyState) ||
         !readValue(in, gs.enemy.lureTarget) ||
         !readValue(in, gs.enemy.lureTimer)) {
-        return false;
+        return failLoad(gs, "Save rejected: invalid enemy state.");
     }
     if (legacyFormat) {
-        double ignoredMoveChance;
-        if (!readValue(in, ignoredMoveChance))
-            return false;
+        double legacyMoveChance;
+        if (!readValue(in, legacyMoveChance))
+            return failLoad(gs, "Save rejected: incomplete legacy enemy state.");
     }
-    if (enemyState < ROAMING || enemyState > AT_OFFICE) return false;
+    if (enemyState < ROAMING || enemyState > AT_OFFICE)
+        return failLoad(gs, "Save rejected: invalid enemy state.");
     gs.enemy.state = static_cast<EnemyState>(enemyState);
 
     if (!readValue(in, gs.gameMap.totalRooms) ||
         !readValue(in, gs.gameMap.officeId) ||
         !readValue(in, gs.gameMap.numCameraGroups)) {
-        return false;
+        return failLoad(gs, "Save rejected: invalid map header.");
     }
     if (gs.gameMap.totalRooms <= 0 || gs.gameMap.totalRooms > 13 ||
-        gs.gameMap.officeId < 0 || gs.gameMap.officeId >= gs.gameMap.totalRooms ||
-        gs.gameMap.numCameraGroups <= 0 || gs.gameMap.numCameraGroups > 4) {
-        return false;
+        gs.gameMap.officeId < 0 || gs.gameMap.officeId >= gs.gameMap.totalRooms) {
+        return failLoad(gs, "Save rejected: invalid map dimensions.");
     }
 
     gs.gameMap.rooms.clear();
     gs.gameMap.rooms.resize(gs.gameMap.totalRooms);
     if (!readValue(in, gs.leftGateClosed) || !readValue(in, gs.rightGateClosed))
-        return false;
+        return failLoad(gs, "Save rejected: invalid gate state.");
 
     in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     for (int i = 0; i < gs.gameMap.totalRooms; i++) {
@@ -163,18 +267,18 @@ bool loadGame(GameState &gs, const std::string &filename) {
             !readValue(in, r.isCamera) ||
             !readValue(in, r.isOffice) ||
             !readValue(in, r.cameraGroup)) {
-            return false;
+            return failLoad(gs, "Save rejected: invalid room metadata.");
         }
         in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
         if (!std::getline(in, r.abbrev) || !std::getline(in, r.name))
-            return false;
+            return failLoad(gs, "Save rejected: incomplete room data.");
         if (!readValue(in, nbCount) || nbCount < 0 || nbCount > gs.gameMap.totalRooms)
-            return false;
+            return failLoad(gs, "Save rejected: invalid room adjacency data.");
         r.neighbors.resize(nbCount);
         for (int j = 0; j < nbCount; j++) {
             if (!readValue(in, r.neighbors[j]) ||
                 r.neighbors[j] < 0 || r.neighbors[j] >= gs.gameMap.totalRooms) {
-                return false;
+                return failLoad(gs, "Save rejected: invalid room adjacency data.");
             }
         }
         in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -182,7 +286,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
 
     int probSize;
     if (!readValue(in, probSize) || probSize < 0 || probSize > gs.gameMap.totalRooms)
-        return false;
+        return failLoad(gs, "Save rejected: invalid probability map header.");
 
     gs.probMap.clear();
     for (int i = 0; i < probSize; i++) {
@@ -190,10 +294,33 @@ bool loadGame(GameState &gs, const std::string &filename) {
         double prob;
         if (!readValue(in, roomId) || !readValue(in, prob) ||
             roomId < 0 || roomId >= gs.gameMap.totalRooms || prob < 0.0) {
-            return false;
+            return failLoad(gs, "Save rejected: invalid probability map data.");
         }
         gs.probMap[roomId] = prob;
     }
+
+    gs.gameMap.numCameraGroups = effectiveCameraGroupCount(gs.gameMap);
+    if (gs.gameMap.numCameraGroups <= 0 || gs.gameMap.numCameraGroups > 4)
+        return failLoad(gs, "Save rejected: invalid camera cluster configuration.");
+
+    if (gs.enemy.currentRoom < 0 || gs.enemy.currentRoom >= gs.gameMap.totalRooms)
+        return failLoad(gs, "Save rejected: enemy location is out of range.");
+    if (gs.enemy.currentRoom == gs.gameMap.officeId)
+        return failLoad(gs, "Save rejected: enemy is already in the office.");
+
+    if (gs.enemy.lastRoom < 0 || gs.enemy.lastRoom >= gs.gameMap.totalRooms)
+        gs.enemy.lastRoom = gs.enemy.currentRoom;
+
+    if (gs.enemy.lureTimer <= 0 ||
+        gs.enemy.lureTarget < 0 ||
+        gs.enemy.lureTarget >= gs.gameMap.totalRooms ||
+        gs.enemy.lureTarget == gs.gameMap.officeId) {
+        gs.enemy.lureTarget = -1;
+        gs.enemy.lureTimer = 0;
+    }
+
+    if (gs.enemy.state == INVESTIGATING && gs.enemy.lureTarget < 0)
+        gs.enemy.state = ROAMING;
 
     gs.status = STATUS_PLAYING;
     gs.statusMessage = "";

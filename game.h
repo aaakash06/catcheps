@@ -21,7 +21,8 @@ struct GameState {
     int cameraPowerCost;      // Quick Sweep cost
     int deepScanPowerCost;    // Deep Scan cost
     int lurePowerCost;
-    int doorPowerCost;        // Closed-gate upkeep per active turn
+    int gateClosePowerCost;
+    int gateUpkeepPowerCost;
     int signalDecayTurns;
     int audioProbDistance3;
     int audioProbDistance2;
@@ -30,6 +31,8 @@ struct GameState {
     int moveSidewaysProb;
     int moveRandomProb;
     int lureCooldownMax;
+    int lureDurationTurns;
+    double lureWeightMultiplier;
     int currentLureCooldown;
     bool leftGateClosed;
     bool rightGateClosed;
@@ -59,6 +62,7 @@ struct GameState {
     void playLure(int roomId);
     void toggleGate(int roomId);
     void updateProbMap();
+    void finishSuccessfulTurn(int action);
 };
 
 // Difficulty parameters

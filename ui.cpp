@@ -40,6 +40,27 @@ static std::string powerBar(int power, int maxPower) {
     return bar;
 }
 
+static std::string lureStatusText(const GameState &gs) {
+    if (gs.enemy.lureTimer > 0 &&
+        gs.enemy.lureTarget >= 0 &&
+        gs.enemy.lureTarget < gs.gameMap.totalRooms) {
+        std::stringstream ss;
+        ss << "Active at " << gs.gameMap.rooms[gs.enemy.lureTarget].abbrev
+           << " (" << gs.enemy.lureTimer << " turns left)";
+        return ss.str();
+    }
+    return "None";
+}
+
+static std::string lureCooldownText(const GameState &gs) {
+    if (gs.currentLureCooldown > 0) {
+        std::stringstream ss;
+        ss << "available in " << gs.currentLureCooldown << " turns";
+        return ss.str();
+    }
+    return "Ready";
+}
+
 // Cursor navigation uses a simple spatial layout derived from the rendered map template.
 struct MapPos { int id; int col; int row; };
 
@@ -235,10 +256,9 @@ void drawGame(const GameState &gs, int cursorRoom) {
               << "% " << powerBar(gs.power, gs.maxPower) << "\n";
     std::cout << "  DOORS: KNOW " << (gs.leftGateClosed ? CLR_BLUE "CLOSED" : CLR_GREEN "OPEN")
               << CLR_RESET << "   KAD " << (gs.rightGateClosed ? CLR_BLUE "CLOSED" : CLR_GREEN "OPEN")
-              << CLR_RESET;
-    if (gs.currentLureCooldown > 0)
-        std::cout << CLR_YELLOW << "   Lure CD: " << gs.currentLureCooldown << CLR_RESET;
-    std::cout << "\n";
+              << CLR_RESET << "\n";
+    std::cout << "  LURE: " << CLR_CYAN << lureStatusText(gs) << CLR_RESET
+              << "   NEXT LURE: " << CLR_YELLOW << lureCooldownText(gs) << CLR_RESET << "\n";
     std::cout << "  LAST KNOWN SIGNAL: " << CLR_YELLOW << getSignalDisplay(gs) << CLR_RESET << "\n";
     std::cout << "================================================================\n";
     std::cout << CLR_RESET;
@@ -384,8 +404,10 @@ void drawHelp() {
     std::cout << "  - Quick Sweep is cheap but only tells you whether a cluster is active.\n";
     std::cout << "  - Deep Scan is expensive, but it gives an exact last known signal.\n";
     std::cout << "  - KAD and KNOW control the two office gates.\n";
+    std::cout << "  - Closed gates drain upkeep every turn, even while waiting.\n";
     std::cout << "  - Audio hints help, but they are not a substitute for scanning.\n";
-    std::cout << "  - Lure the intruder away before sealing MB.\n";
+    std::cout << "  - Lure: place a distraction at the selected building. If the enemy is nearby,\n";
+    std::cout << "    it may move toward the lure instead of the office.\n";
     std::cout << "  - Manage energy carefully!\n";
     std::cout << "\n================================================================\n";
     std::cout << "  Press Enter to go back...\n";

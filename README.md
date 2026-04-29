@@ -72,20 +72,23 @@ Example:
 ## Energy Cost by Difficulty
 ### Easy
 - Quick Sweep: `1%`
-- Deep Scan: `3%`
-- Door active cost: `1%` per active turn while the gate stays closed
-- Lure: `3%`
+- Deep Scan: `2%`
+- Gate close cost: `1%`
+- Door upkeep: `1%` per turn while the gate stays closed
+- Lure: `2%`
 
 ### Normal
 - Quick Sweep: `2%`
-- Deep Scan: `5%`
-- Door active cost: `1%` per active turn while the gate stays closed
+- Deep Scan: `4%`
+- Gate close cost: `2%`
+- Door upkeep: `1%` per turn while the gate stays closed
 - Lure: `4%`
 
 ### Hard
-- Quick Sweep: `3%`
-- Deep Scan: `6%`
-- Door active cost: `2%` per active turn while the gate stays closed
+- Quick Sweep: `2%`
+- Deep Scan: `5%`
+- Gate close cost: `2%`
+- Door upkeep: `2%` per turn while the gate stays closed
 - Lure: `5%`
 
 ### Wait Rule
@@ -93,17 +96,16 @@ Example:
 - the turn still advances
 - the enemy still moves
 - win/loss checks still happen
-- no energy is drained on a pure wait turn
+- no direct action energy is drained on a pure wait turn
 
 ### Door Upkeep Rule
 - upkeep is charged per `closed` office gate, not per open gate
 - `0` closed gates = `0` door upkeep
 - `1` closed gate = upkeep for `1`
 - `2` closed gates = upkeep for `2`
-- this upkeep only applies on turns where the player uses an active action
-- if the player chooses to wait, no energy is drained at all
+- this upkeep applies every turn while a gate remains closed, including `Wait` turns
 
-This keeps waiting risky without making it a hidden energy tax.
+This keeps waiting free as an action, but closed gates still tax the power grid.
 
 ## Audio Hint System
 Audio hints are probabilistic but never fake. If a hint appears, it is based on the enemy's real distance from the office after the enemy moves.
@@ -142,17 +144,18 @@ The signal then decays over time:
 
 ### Easy
 - current turn: `Strong`
-- next two turns: `Weak`
+- next three turns: `Weak`
 - then: `Gone`
 
 ### Normal
 - current turn: `Strong`
-- next turn: `Weak`
+- next two turns: `Weak`
 - then: `Gone`
 
 ### Hard
 - current turn: `Strong`
-- next turn onward: `Gone`
+- next turn: `Weak`
+- then: `Gone`
 
 Display examples:
 - current turn: `LIB [!!]`
@@ -171,9 +174,9 @@ Each turn, the enemy chooses among legal neighboring rooms using:
 
 ### Movement Probabilities
 #### Easy
-- closer: `55%`
+- closer: `50%`
 - sideways: `30%`
-- random: `15%`
+- random: `20%`
 
 #### Normal
 - closer: `65%`
@@ -181,11 +184,35 @@ Each turn, the enemy chooses among legal neighboring rooms using:
 - random: `10%`
 
 #### Hard
-- closer: `85%`
+- closer: `75%`
 - sideways: `15%`
-- random: `0%`
+- random: `10%`
 
 This makes the enemy feel like it is stalking the player instead of wandering aimlessly, while still allowing some unpredictability on Easy and Normal.
+
+## Lure Behavior
+- Lure: place a distraction at the selected building. If the enemy is nearby, it may move toward the lure instead of the office.
+- The effect is probabilistic, not guaranteed.
+- After normal office-seeking weights are assigned, moves that get closer to the lure receive an extra multiplier.
+
+### Lure Tuning by Difficulty
+#### Easy
+- cost: `2%`
+- cooldown: `3` turns
+- duration: `3` turns
+- lure weight multiplier: `2.5x`
+
+#### Normal
+- cost: `4%`
+- cooldown: `4` turns
+- duration: `3` turns
+- lure weight multiplier: `2.75x`
+
+#### Hard
+- cost: `5%`
+- cooldown: `5` turns
+- duration: `2` turns
+- lure weight multiplier: `3.0x`
 
 ## Difficulty Identity
 ### Easy
@@ -216,7 +243,6 @@ This makes the enemy feel like it is stalking the player instead of wandering ai
 ### Random Events
 - audio hint probability is random but truthful
 - enemy movement uses weighted random choice
-- lure target selection is random within a chosen cluster
 - enemy spawn is chosen from rooms far from the office
 
 ### Data Structures

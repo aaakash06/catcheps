@@ -40,8 +40,9 @@ static int weightedChoice(const std::vector<int> &rooms, const std::vector<doubl
 }
 
 // Chooses the enemy's next room using distance-to-office categories plus lure bias.
-static int chooseNextRoom(const GameState &gs, const Enemy &enemy) {
+static int chooseNextRoom(const GameState &gs, const Enemy &enemy, bool *usedLureBias) {
     std::vector<int> neighbors = getOpenNeighbors(gs, enemy.currentRoom);
+    if (usedLureBias) *usedLureBias = false;
     if (neighbors.empty()) return enemy.currentRoom;
 
     std::map<int, int> distToOffice = bfsDistances(gs.gameMap.rooms, gs.gameMap.officeId,
@@ -94,11 +95,17 @@ static int chooseNextRoom(const GameState &gs, const Enemy &enemy) {
         for (size_t i = 0; i < neighbors.size(); i++) {
             int nb = neighbors[i];
             if (distToLure.count(nb) && distToLure[nb] < currentLureDist)
-                weights[i] *= 1.75;
+                weights[i] *= gs.lureWeightMultiplier;
         }
     }
 
-    return weightedChoice(neighbors, weights);
+    int chosen = weightedChoice(neighbors, weights);
+    if (usedLureBias && enemy.lureTimer > 0 && !distToLure.empty()) {
+        int currentLureDist = distToLure.count(enemy.currentRoom) ? distToLure[enemy.currentRoom] : 999;
+        if (distToLure.count(chosen) && distToLure[chosen] < currentLureDist)
+            *usedLureBias = true;
+    }
+    return chosen;
 }
 
 // Builds a reset enemy in an invalid room until a night spawn is assigned.
@@ -115,11 +122,12 @@ void Enemy::init(int startRoom, Difficulty) {
 }
 
 // Moves the enemy exactly one step per turn when a legal graph move exists.
-void Enemy::move(const GameState &gs) {
+bool Enemy::move(const GameState &gs) {
     const GameMap &map = gs.gameMap;
-    if (currentRoom < 0 || currentRoom >= map.totalRooms) return;
+    if (currentRoom < 0 || currentRoom >= map.totalRooms) return false;
 
-    int chosen = chooseNextRoom(gs, *this);
+    bool lureFavoredMove = false;
+    int chosen = chooseNextRoom(gs, *this, &lureFavoredMove);
     lastRoom = currentRoom;
     currentRoom = chosen;
 
@@ -129,6 +137,8 @@ void Enemy::move(const GameState &gs) {
         state = INVESTIGATING;
     else
         state = ROAMING;
+
+    return lureFavoredMove;
 }
 
 // Redirects the enemy toward a target room for a limited number of turns.
@@ -139,12 +149,14 @@ void Enemy::applyLure(int targetRoom, int duration) {
 }
 
 // Advances the lure timer and clears it when the distraction expires.
-void Enemy::tickLure() {
+bool Enemy::tickLure() {
     if (lureTimer > 0) {
         lureTimer--;
         if (lureTimer == 0) {
             lureTarget = -1;
             state = ROAMING;
+            return true;
         }
     }
+    return false;
 }

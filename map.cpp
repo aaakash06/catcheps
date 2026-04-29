@@ -128,6 +128,17 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
 
     return "?";
 }
+
+int effectiveCameraGroupCount(const GameMap &map) {
+    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 4)
+        return map.numCameraGroups;
+
+    if (map.totalRooms == 8 || map.totalRooms == 10 || map.totalRooms == 13)
+        return 4;
+
+    return 0;
+}
+
 bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
     if (roomId < 0 || roomId >= map.totalRooms) return false;
 

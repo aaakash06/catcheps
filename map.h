@@ -29,6 +29,10 @@ GameMap buildMap(Difficulty diff);
 // Get camera group label.
 std::string cameraGroupLabel(const GameMap &map, int group);
 
+// Get the effective camera group count for this map layout, falling back from
+// stale or missing saved values when possible.
+int effectiveCameraGroupCount(const GameMap &map);
+
 // Get all rooms in a camera group.
 std::vector<int> roomsInGroup(const GameMap &map, int group);
 

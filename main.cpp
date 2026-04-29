@@ -40,7 +40,8 @@ static int promptNumberedMenu(const std::string &title,
 
 static int selectCameraGroup(GameState &gs, int cursorRoom) {
     std::vector<std::string> options;
-    for (int i = 0; i < gs.gameMap.numCameraGroups; i++) {
+    int groupCount = effectiveCameraGroupCount(gs.gameMap);
+    for (int i = 0; i < groupCount; i++) {
         auto roomIds = roomsInGroup(gs.gameMap, i);
         std::string option = cameraGroupLabel(gs.gameMap, i) + " (";
         for (size_t j = 0; j < roomIds.size(); j++) {
@@ -52,6 +53,8 @@ static int selectCameraGroup(GameState &gs, int cursorRoom) {
             option += " <- cursor location";
         options.push_back(option);
     }
+    if (options.empty())
+        return -1;
     return promptNumberedMenu("  Select camera cluster:", options);
 }
 
@@ -149,7 +152,10 @@ int main() {
                 runGameLoop(gs);
                 restoreTerminal();
             } else {
-                std::cout << "  No save file found.\n";
+                if (!gs.statusMessage.empty())
+                    std::cout << "  " << gs.statusMessage << "\n";
+                else
+                    std::cout << "  No save file found.\n";
                 pause("  Press Enter to continue...");
             }
         } else if (choice == 3) {

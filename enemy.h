@@ -25,9 +25,9 @@ struct Enemy {
 
     Enemy();
     void init(int startRoom, Difficulty diff);
-    void move(const GameState &gs);
+    bool move(const GameState &gs);
     void applyLure(int targetRoom, int duration);
-    void tickLure();
+    bool tickLure();
 };
 
 #endif

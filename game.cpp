@@ -13,6 +13,32 @@ static std::string toLowerCopy(const std::string &text) {
 }
 
 static int primaryClusterForRoom(const GameMap &map, int roomId);
+static bool clusterContainsOfficeGate(const GameMap &map, int group);
+static bool isOfficeGateRoom(int roomId);
+static std::string officeEntryGateMessage(const GameState &gs);
+
+static void normalizeProbabilityMap(const GameMap &map, std::map<int, double> &probMap) {
+    double total = 0.0;
+    for (int roomId = 0; roomId < map.totalRooms; roomId++) {
+        double value = probMap.count(roomId) ? probMap[roomId] : 0.0;
+        if (value < 0.0 || value != value)
+            value = 0.0;
+        probMap[roomId] = value;
+        total += value;
+    }
+
+    if (total <= 0.0) {
+        if (map.totalRooms <= 0)
+            return;
+        double share = 1.0 / map.totalRooms;
+        for (int roomId = 0; roomId < map.totalRooms; roomId++)
+            probMap[roomId] = share;
+        return;
+    }
+
+    for (int roomId = 0; roomId < map.totalRooms; roomId++)
+        probMap[roomId] /= total;
+}
 
 static std::string initialEnemyLog(const GameState &gs, int roomId) {
     const std::string roomCode = gs.gameMap.rooms[roomId].abbrev;
@@ -27,11 +53,27 @@ static std::string initialEnemyLog(const GameState &gs, int roomId) {
 }
 
 static int primaryClusterForRoom(const GameMap &map, int roomId) {
-    for (int group = 0; group < map.numCameraGroups; group++) {
+    for (int group = 0; group < effectiveCameraGroupCount(map); group++) {
         if (roomInCameraGroup(map, roomId, group))
             return group;
     }
     return -1;
+}
+
+static bool clusterContainsOfficeGate(const GameMap &map, int group) {
+    return roomInCameraGroup(map, 3, group) || roomInCameraGroup(map, 4, group);
+}
+
+static bool isOfficeGateRoom(int roomId) {
+    return roomId == 3 || roomId == 4;
+}
+
+static std::string officeEntryGateMessage(const GameState &gs) {
+    if (gs.enemy.lastRoom == 4)
+        return "The intruder entered MB through the KNOW gate.";
+    if (gs.enemy.lastRoom == 3)
+        return "The intruder entered MB through the KAD gate.";
+    return "The intruder entered MB through an unknown gate.";
 }
 
 static int enemyDistanceToOffice(const GameState &gs) {
@@ -99,50 +141,59 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
     gs.maxPower = 100;
 
     if (diff == EASY) {
-        gs.totalNights = 3;
-        gs.maxTurns = 30;
+        gs.totalNights = 2;
+        gs.maxTurns = 20;
         gs.cameraPowerCost = 1;
-        gs.deepScanPowerCost = 3;
-        gs.lurePowerCost = 3;
-        gs.doorPowerCost = 1;
-        gs.signalDecayTurns = 3;
+        gs.deepScanPowerCost = 2;
+        gs.lurePowerCost = 2;
+        gs.gateClosePowerCost = 1;
+        gs.gateUpkeepPowerCost = 1;
+        gs.signalDecayTurns = 4;
         gs.audioProbDistance3 = 25;
         gs.audioProbDistance2 = 40;
         gs.audioProbDistance1 = 65;
-        gs.moveCloserProb = 55;
+        gs.moveCloserProb = 50;
         gs.moveSidewaysProb = 30;
-        gs.moveRandomProb = 15;
-        gs.lureCooldownMax = 2;
+        gs.moveRandomProb = 20;
+        gs.lureCooldownMax = 3;
+        gs.lureDurationTurns = 3;
+        gs.lureWeightMultiplier = 2.5;
     } else if (diff == NORMAL) {
         gs.totalNights = 4;
         gs.maxTurns = 35;
         gs.cameraPowerCost = 2;
-        gs.deepScanPowerCost = 5;
+        gs.deepScanPowerCost = 4;
         gs.lurePowerCost = 4;
-        gs.doorPowerCost = 1;
-        gs.signalDecayTurns = 2;
+        gs.gateClosePowerCost = 2;
+        gs.gateUpkeepPowerCost = 1;
+        gs.signalDecayTurns = 3;
         gs.audioProbDistance3 = 20;
         gs.audioProbDistance2 = 35;
         gs.audioProbDistance1 = 60;
         gs.moveCloserProb = 65;
         gs.moveSidewaysProb = 25;
         gs.moveRandomProb = 10;
-        gs.lureCooldownMax = 3;
+        gs.lureCooldownMax = 4;
+        gs.lureDurationTurns = 3;
+        gs.lureWeightMultiplier = 2.75;
     } else {
         gs.totalNights = 5;
         gs.maxTurns = 40;
-        gs.cameraPowerCost = 3;
-        gs.deepScanPowerCost = 6;
+        gs.cameraPowerCost = 2;
+        gs.deepScanPowerCost = 5;
         gs.lurePowerCost = 5;
-        gs.doorPowerCost = 2;
-        gs.signalDecayTurns = 1;
+        gs.gateClosePowerCost = 2;
+        gs.gateUpkeepPowerCost = 2;
+        gs.signalDecayTurns = 2;
         gs.audioProbDistance3 = 10;
         gs.audioProbDistance2 = 25;
         gs.audioProbDistance1 = 45;
-        gs.moveCloserProb = 85;
+        gs.moveCloserProb = 75;
         gs.moveSidewaysProb = 15;
-        gs.moveRandomProb = 0;
-        gs.lureCooldownMax = 4;
+        gs.moveRandomProb = 10;
+        gs.lureCooldownMax = 5;
+        gs.lureDurationTurns = 2;
+        gs.lureWeightMultiplier = 3.0;
     }
 }
 
@@ -170,10 +221,11 @@ std::string getSignalDisplay(const GameState &gs) {
 
 GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(3),
     turn(0), maxTurns(30), power(100), maxPower(100),
-    cameraPowerCost(1), deepScanPowerCost(3), lurePowerCost(3), doorPowerCost(1),
-    signalDecayTurns(3), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
-    moveCloserProb(55), moveSidewaysProb(30), moveRandomProb(15),
-    lureCooldownMax(2), currentLureCooldown(0),
+    cameraPowerCost(1), deepScanPowerCost(2), lurePowerCost(2),
+    gateClosePowerCost(1), gateUpkeepPowerCost(1),
+    signalDecayTurns(4), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
+    moveCloserProb(50), moveSidewaysProb(30), moveRandomProb(20),
+    lureCooldownMax(3), lureDurationTurns(3), lureWeightMultiplier(2.5), currentLureCooldown(0),
     leftGateClosed(false), rightGateClosed(false),
     lastKnownEnemyRoom(-1), lastKnownEnemyTurn(-9999),
     status(STATUS_PLAYING) {}
@@ -210,6 +262,7 @@ void GameState::newNight(bool preserveEventLog) {
     currentLureCooldown = 0;
     leftGateClosed = false;
     rightGateClosed = false;
+    gameMap.numCameraGroups = effectiveCameraGroupCount(gameMap);
 
     probMap.clear();
     if (difficulty == HARD) {
@@ -242,14 +295,14 @@ void GameState::newNight(bool preserveEventLog) {
 }
 
 // Processes one player action, then resolves enemy movement, audio hints,
-// closed-gate upkeep on active turns, win/loss checks, and probability updates.
+// closed-gate upkeep, win/loss checks, and probability updates.
 void GameState::doTurn(int action, int param) {
     if (status != STATUS_PLAYING) return;
 
     turn++;
+    int attemptedTurn = turn;
     eventLog.clear();
     lastScanOutput.clear();
-    bool drainPowerThisTurn = true;
 
     switch (action) {
         case 1: quickSweep(param); break;
@@ -258,7 +311,6 @@ void GameState::doTurn(int action, int param) {
         case 4: playLure(param); break;
         case 5:
             eventLog.push_back("You wait and listen...");
-            drainPowerThisTurn = false;
             break;
         default:
             eventLog.push_back("Invalid action.");
@@ -266,18 +318,25 @@ void GameState::doTurn(int action, int param) {
             return;
     }
 
+    if (turn < attemptedTurn)
+        return;
+
     if (status != STATUS_PLAYING) return;
 
-    if (currentLureCooldown > 0) currentLureCooldown--;
+    finishSuccessfulTurn(action);
+}
 
+// Resolves the common enemy/audio/upkeep/check pipeline after one successful player action.
+void GameState::finishSuccessfulTurn(int action) {
     enemyTurn();
     maybeGenerateAudioHint(*this);
 
-    if (drainPowerThisTurn) {
-        if (leftGateClosed) power -= doorPowerCost;
-        if (rightGateClosed) power -= doorPowerCost;
-        if (power < 0) power = 0;
-    }
+    if (currentLureCooldown > 0 && action != 4)
+        currentLureCooldown--;
+
+    if (leftGateClosed) power -= gateUpkeepPowerCost;
+    if (rightGateClosed) power -= gateUpkeepPowerCost;
+    if (power < 0) power = 0;
 
     checkConditions();
     updateProbMap();
@@ -285,8 +344,8 @@ void GameState::doTurn(int action, int param) {
 
 // Advances the enemy exactly once for the turn and records a compact hidden-state log entry.
 void GameState::enemyTurn() {
-    enemy.tickLure();
-    enemy.move(*this);
+    bool lureFavoredMove = enemy.move(*this);
+    int lureTargetBeforeTick = enemy.lureTarget;
 
     std::stringstream ss;
     ss << "Turn " << turn << ": Enemy ";
@@ -295,13 +354,29 @@ void GameState::enemyTurn() {
     else
         ss << "moved.";
     eventLog.push_back(ss.str());
+
+    if (lureFavoredMove)
+        eventLog.push_back("Something seems distracted by the lure...");
+
+    bool lureExpired = enemy.tickLure();
+    if (lureExpired && lureTargetBeforeTick >= 0 && lureTargetBeforeTick < gameMap.totalRooms)
+        eventLog.push_back("The lure at " + gameMap.rooms[lureTargetBeforeTick].abbrev + " has gone silent.");
 }
 
 // Updates win/loss state after the player action, enemy move, and resource systems resolve.
 void GameState::checkConditions() {
     if (enemy.currentRoom == gameMap.officeId) {
+        bool validEntry = (enemy.lastRoom == 4 && !leftGateClosed) ||
+                          (enemy.lastRoom == 3 && !rightGateClosed);
+        if (!validEntry) {
+            if (enemy.lastRoom >= 0 && enemy.lastRoom < gameMap.totalRooms)
+                enemy.currentRoom = enemy.lastRoom;
+            enemy.state = ROAMING;
+            eventLog.push_back("The intruder was stopped at the office gate.");
+            return;
+        }
         status = STATUS_LOSE_ENEMY;
-        statusMessage = "The intruder reached Main Building. GAME OVER.";
+        statusMessage = officeEntryGateMessage(*this) + " GAME OVER.";
         return;
     }
     if (power <= 0) {
@@ -323,7 +398,7 @@ void GameState::checkConditions() {
 
 // Performs a cheap cluster-level scan that only reports whether any movement is present.
 void GameState::quickSweep(int group) {
-    if (group < 0 || group >= gameMap.numCameraGroups) {
+    if (group < 0 || group >= effectiveCameraGroupCount(gameMap)) {
         eventLog.push_back("Invalid camera cluster.");
         turn--;
         return;
@@ -341,7 +416,9 @@ void GameState::quickSweep(int group) {
 
     lastScanOutput.push_back("QUICK SWEEP - " + label);
     if (movementDetected)
-        lastScanOutput.push_back("Movement detected in " + label + ".");
+        lastScanOutput.push_back(clusterContainsOfficeGate(gameMap, group)
+            ? "Movement detected near the office gates."
+            : "Movement detected in " + label + ".");
     else
         lastScanOutput.push_back("No movement detected in " + label + ".");
 
@@ -370,8 +447,26 @@ void GameState::deepScan(int roomId) {
     if (enemy.currentRoom == roomId) {
         lastKnownEnemyRoom = roomId;
         lastKnownEnemyTurn = turn;
-        lastScanOutput.push_back("Enemy detected at " + label + ".");
-        eventLog.push_back("Deep Scan confirmed the intruder at " + gameMap.rooms[roomId].name + ".");
+        if (isOfficeGateRoom(roomId)) {
+            lastScanOutput.push_back("Enemy detected at " + label + " gate!");
+            eventLog.push_back("Deep Scan confirmed the intruder at " + gameMap.rooms[roomId].name + ".");
+            bool gateOpen = (roomId == 3) ? !rightGateClosed : !leftGateClosed;
+            if (gateOpen) {
+                bool *gate = (roomId == 3) ? &rightGateClosed : &leftGateClosed;
+                if (power < gateClosePowerCost) {
+                    lastScanOutput.push_back("Not enough energy to close the " + label + " gate!");
+                    eventLog.push_back("Not enough energy to close the " + label + " gate!");
+                } else {
+                    power -= gateClosePowerCost;
+                    *gate = true;
+                    lastScanOutput.push_back(label + " gate closed automatically.");
+                    eventLog.push_back(label + " gate closed automatically.");
+                }
+            }
+        } else {
+            lastScanOutput.push_back("Enemy detected at " + label + ".");
+            eventLog.push_back("Deep Scan confirmed the intruder at " + gameMap.rooms[roomId].name + ".");
+        }
     } else {
         lastScanOutput.push_back("No movement detected at " + label + ".");
         eventLog.push_back("Deep Scan found no movement at " + gameMap.rooms[roomId].name + ".");
@@ -401,8 +496,7 @@ void GameState::playLure(int roomId) {
     power -= lurePowerCost;
     currentLureCooldown = lureCooldownMax;
 
-    int duration = (difficulty == EASY) ? 4 : (difficulty == NORMAL) ? 3 : 2;
-    enemy.applyLure(roomId, duration);
+    enemy.applyLure(roomId, lureDurationTurns);
 
     std::stringstream ss;
     ss << "Lure placed at " << gameMap.rooms[roomId].name
@@ -433,15 +527,15 @@ void GameState::toggleGate(int roomId) {
     }
 
     if (!*gate) {
-        if (power < doorPowerCost) {
+        if (power < gateClosePowerCost) {
             eventLog.push_back("Not enough energy to close this gate.");
             turn--;
             return;
         }
-        power -= doorPowerCost;
+        power -= gateClosePowerCost;
         *gate = true;
         std::stringstream ss;
-        ss << gateLabel << " closed (-" << doorPowerCost << "% energy).";
+        ss << gateLabel << " closed (-" << gateClosePowerCost << "% energy).";
         eventLog.push_back(ss.str());
     } else {
         *gate = false;
@@ -454,17 +548,29 @@ void GameState::toggleGate(int roomId) {
 void GameState::updateProbMap() {
     if (getSignalStrength(*this) != SIGNAL_NONE && lastKnownEnemyRoom >= 0) {
         for (auto &p : probMap)
-            p.second = 0.01;
-        probMap[lastKnownEnemyRoom] = 0.5;
+            p.second = 0.0;
 
         const std::vector<int> &neighbors = gameMap.rooms[lastKnownEnemyRoom].neighbors;
-        double spread = 0.5 / (neighbors.size() + 1);
+        std::vector<int> openNeighbors;
         for (int nb : neighbors)
             if (!isBlockedEdge(*this, lastKnownEnemyRoom, nb))
+                openNeighbors.push_back(nb);
+
+        if (openNeighbors.empty()) {
+            probMap[lastKnownEnemyRoom] = 1.0;
+        } else {
+            probMap[lastKnownEnemyRoom] = 0.5;
+            double spread = 0.5 / openNeighbors.size();
+            for (int nb : openNeighbors)
                 probMap[nb] += spread;
-        probMap[lastKnownEnemyRoom] += spread;
+        }
+    } else if (probMap.empty()) {
+        double share = 1.0 / gameMap.totalRooms;
+        for (int roomId = 0; roomId < gameMap.totalRooms; roomId++)
+            probMap[roomId] = share;
     }
 
     diffuseProbability(gameMap.rooms, probMap, gameMap.officeId,
                        leftGateClosed, rightGateClosed);
+    normalizeProbabilityMap(gameMap, probMap);
 }
