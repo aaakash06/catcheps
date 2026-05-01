@@ -1,35 +1,35 @@
 CW_SAVE_V4
-1
+0
 1
 2
 0
-25
-100
-100
-2
-4
-4
-2
-1
-3
 20
-35
-60
-65
-25
-10
+100
+100
+1
+2
+2
+1
+1
 4
+25
+40
+65
+50
+30
+20
 3
-2.75
+3
+2.5
 0
-8
+7
 0
-8
-8
+7
+7
 0
 -1
 0
-10
+8
 0
 4
 0 0 0
@@ -46,8 +46,8 @@ K K Leung Building
 2 1 0 1
 LIB
 Main Library
-4
-4 1 6 9 
+3
+4 1 6 
 3 1 0 0
 KAD
 Kadoorie Building
@@ -61,8 +61,8 @@ Knowles Building
 5 1 0 2
 CYM
 Chong Yuet Ming
-3
-6 7 9 
+2
+6 7 
 6 1 0 1
 HC
 Haking Wong
@@ -71,19 +71,9 @@ Haking Wong
 7 1 0 2
 HW
 Haking Wong Eng
-3
-6 5 8 
-8 1 0 2
-MW
-Meng Wah Complex
-1
-7 
-9 1 0 2
-RM
-Runme Shaw
 2
-2 5 
-10
+6 5 
+8
 0 0
 1 0
 2 0
@@ -91,6 +81,4 @@ Runme Shaw
 4 0
 5 0
 6 0
-7 0
-8 1
-9 0
+7 1
