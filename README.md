@@ -9,11 +9,12 @@ The goal is to survive until 6 AM across multiple nights while managing limited 
 Compile on the HKU Linux / academy server from the project root:
 
 ```bash
-g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o camerawatch
+g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o camerawatch -lncurses
 ./camerawatch
 ```
 
 Run the executable from the repository root so the ASCII templates in `maps/` can be loaded correctly.
+The in-game HUD uses the standard Linux `ncurses` library for its centered bordered viewport, so link with `-lncurses`.
 
 ## Controls
 - `Arrow Keys`: move the cursor between connected buildings
