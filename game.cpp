@@ -200,7 +200,7 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.totalNights = 2;
         gs.maxTurns = 25;
         gs.cameraPowerCost = 2;
-        gs.deepScanPowerCost = 5;
+        gs.deepScanPowerCost = 3;
         gs.lurePowerCost = 4;
         gs.gateClosePowerCost = 2;
         gs.gateUpkeepPowerCost = 1;

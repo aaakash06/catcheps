@@ -8,8 +8,22 @@
 // Clear terminal screen.
 void clearScreen();
 
+// Dynamic terminal centering helpers.
+int getCenterY(int totalRows);
+int getCenterX(int textLength);
+void printAt(int y, int x, const std::string &text);
+void printCentered(int y, const std::string &text);
+void drawCenteredArt(int startY, const std::string &art);
+
+// Start/stop the ncurses viewport used by the in-game HUD.
+void startGameViewport();
+void stopGameViewport();
+
 // Draw the full game HUD with spatial map.
 void drawGame(const GameState &gs, int cursorRoom);
+
+// Draw the game HUD with an in-panel Quick Sweep cluster picker.
+void drawSweepSelection(const GameState &gs, int cursorRoom, int selectedGroup);
 
 // Draw the main menu.
 void drawMainMenu();
