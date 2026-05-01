@@ -14,8 +14,9 @@ static std::string toLowerCopy(const std::string &text) {
 
 static int primaryClusterForRoom(const GameMap &map, int roomId);
 static bool clusterContainsOfficeGate(const GameMap &map, int group);
-static bool isOfficeGateRoom(int roomId);
+static bool isOfficeGateRoom(const GameState &gs, int roomId);
 static std::string officeEntryGateMessage(const GameState &gs);
+static bool hasGraphEdge(const GameMap &map, int a, int b);
 
 static void normalizeProbabilityMap(const GameMap &map, std::map<int, double> &probMap) {
     double total = 0.0;
@@ -61,11 +62,15 @@ static int primaryClusterForRoom(const GameMap &map, int roomId) {
 }
 
 static bool clusterContainsOfficeGate(const GameMap &map, int group) {
-    return roomInCameraGroup(map, 3, group) || roomInCameraGroup(map, 4, group);
+    return roomInCameraGroup(map, 3, group) ||
+           roomInCameraGroup(map, 4, group) ||
+           (hasGraphEdge(map, 2, map.officeId) && roomInCameraGroup(map, 2, group));
 }
 
-static bool isOfficeGateRoom(int roomId) {
-    return roomId == 3 || roomId == 4;
+static bool isOfficeGateRoom(const GameState &gs, int roomId) {
+    return roomId == 3 ||
+           roomId == 4 ||
+           (roomId == 2 && hasGraphEdge(gs.gameMap, roomId, gs.gameMap.officeId));
 }
 
 static std::string officeEntryGateMessage(const GameState &gs) {
@@ -73,13 +78,24 @@ static std::string officeEntryGateMessage(const GameState &gs) {
         return "The intruder entered MB through the KNOW gate.";
     if (gs.enemy.lastRoom == 3)
         return "The intruder entered MB through the KAD gate.";
+    if (gs.enemy.lastRoom == 2)
+        return "The intruder entered MB through the LIB center gate.";
     return "The intruder entered MB through an unknown gate.";
+}
+
+static bool hasGraphEdge(const GameMap &map, int a, int b) {
+    if (a < 0 || b < 0 || a >= map.totalRooms || b >= map.totalRooms)
+        return false;
+
+    const std::vector<int> &neighbors = map.rooms[a].neighbors;
+    return std::find(neighbors.begin(), neighbors.end(), b) != neighbors.end();
 }
 
 static int enemyDistanceToOffice(const GameState &gs) {
     auto dist = bfsDistances(gs.gameMap.rooms, gs.gameMap.officeId,
                              gs.gameMap.officeId,
-                             gs.leftGateClosed, gs.rightGateClosed);
+                             gs.leftGateClosed, gs.rightGateClosed,
+                             gs.centerGateClosed);
     if (!dist.count(gs.enemy.currentRoom))
         return 999;
     return dist[gs.enemy.currentRoom];
@@ -119,9 +135,10 @@ static void maybeGenerateAudioHint(GameState &gs) {
     gs.eventLog.push_back(audioHintText(gs, gs.enemy.currentRoom, distance));
 }
 
-// Returns whether a movement edge is blocked by one of the two office gates.
+// Returns whether a movement edge is blocked by an office gate.
 bool isBlockedEdge(const GameState& gs, int from, int to) {
     const int MB = gs.gameMap.officeId;
+    const int LIB = 2;
     const int KAD = 3;
     const int KNOW = 4;
 
@@ -130,6 +147,9 @@ bool isBlockedEdge(const GameState& gs, int from, int to) {
 
     if ((from == MB && to == KAD) || (from == KAD && to == MB))
         return gs.rightGateClosed;
+
+    if ((from == MB && to == LIB) || (from == LIB && to == MB))
+        return gs.centerGateClosed;
 
     return false;
 }
@@ -177,21 +197,21 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.lureDurationTurns = 3;
         gs.lureWeightMultiplier = 2.75;
     } else {
-        gs.totalNights = 5;
-        gs.maxTurns = 40;
+        gs.totalNights = 2;
+        gs.maxTurns = 25;
         gs.cameraPowerCost = 2;
         gs.deepScanPowerCost = 5;
-        gs.lurePowerCost = 5;
+        gs.lurePowerCost = 4;
         gs.gateClosePowerCost = 2;
-        gs.gateUpkeepPowerCost = 2;
+        gs.gateUpkeepPowerCost = 1;
         gs.signalDecayTurns = 2;
         gs.audioProbDistance3 = 10;
         gs.audioProbDistance2 = 25;
         gs.audioProbDistance1 = 45;
-        gs.moveCloserProb = 75;
-        gs.moveSidewaysProb = 15;
+        gs.moveCloserProb = 70;
+        gs.moveSidewaysProb = 20;
         gs.moveRandomProb = 10;
-        gs.lureCooldownMax = 5;
+        gs.lureCooldownMax = 4;
         gs.lureDurationTurns = 2;
         gs.lureWeightMultiplier = 3.0;
     }
@@ -226,7 +246,7 @@ GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(3),
     signalDecayTurns(4), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
     moveCloserProb(50), moveSidewaysProb(30), moveRandomProb(20),
     lureCooldownMax(3), lureDurationTurns(3), lureWeightMultiplier(2.5), currentLureCooldown(0),
-    leftGateClosed(false), rightGateClosed(false),
+    leftGateClosed(false), centerGateClosed(false), rightGateClosed(false),
     lastKnownEnemyRoom(-1), lastKnownEnemyTurn(-9999),
     status(STATUS_PLAYING) {}
 
@@ -256,6 +276,7 @@ void GameState::newNight(bool preserveEventLog) {
     lastScanOutput.clear();
     currentLureCooldown = 0;
     leftGateClosed = false;
+    centerGateClosed = false;
     rightGateClosed = false;
     gameMap.numCameraGroups = effectiveCameraGroupCount(gameMap);
 
@@ -314,8 +335,11 @@ void GameState::finishSuccessfulTurn(int action) {
     if (currentLureCooldown > 0 && action != 4)
         currentLureCooldown--;
 
-    if (leftGateClosed) power -= gateUpkeepPowerCost;
-    if (rightGateClosed) power -= gateUpkeepPowerCost;
+    int activeGateCount = 0;
+    if (leftGateClosed) activeGateCount++;
+    if (centerGateClosed) activeGateCount++;
+    if (rightGateClosed) activeGateCount++;
+    power -= activeGateCount * gateUpkeepPowerCost;
     if (power < 0) power = 0;
 
     checkConditions();
@@ -347,7 +371,10 @@ void GameState::enemyTurn() {
 void GameState::checkConditions() {
     if (enemy.currentRoom == gameMap.officeId) {
         bool validEntry = (enemy.lastRoom == 4 && !leftGateClosed) ||
-                          (enemy.lastRoom == 3 && !rightGateClosed);
+                          (enemy.lastRoom == 3 && !rightGateClosed) ||
+                          (enemy.lastRoom == 2 &&
+                           hasGraphEdge(gameMap, enemy.lastRoom, gameMap.officeId) &&
+                           !centerGateClosed);
         if (!validEntry) {
             if (enemy.lastRoom >= 0 && enemy.lastRoom < gameMap.totalRooms)
                 enemy.currentRoom = enemy.lastRoom;
@@ -427,12 +454,22 @@ void GameState::deepScan(int roomId) {
     if (enemy.currentRoom == roomId) {
         lastKnownEnemyRoom = roomId;
         lastKnownEnemyTurn = turn;
-        if (isOfficeGateRoom(roomId)) {
+        if (isOfficeGateRoom(*this, roomId)) {
             lastScanOutput.push_back("Enemy detected at " + label + " gate!");
             eventLog.push_back("Deep Scan confirmed the intruder at " + gameMap.rooms[roomId].name + ".");
-            bool gateOpen = (roomId == 3) ? !rightGateClosed : !leftGateClosed;
+            bool gateOpen = false;
+            bool *gate = nullptr;
+            if (roomId == 3) {
+                gateOpen = !rightGateClosed;
+                gate = &rightGateClosed;
+            } else if (roomId == 4) {
+                gateOpen = !leftGateClosed;
+                gate = &leftGateClosed;
+            } else {
+                gateOpen = !centerGateClosed;
+                gate = &centerGateClosed;
+            }
             if (gateOpen) {
-                bool *gate = (roomId == 3) ? &rightGateClosed : &leftGateClosed;
                 if (power < gateClosePowerCost) {
                     lastScanOutput.push_back("Not enough energy to close the " + label + " gate!");
                     eventLog.push_back("Not enough energy to close the " + label + " gate!");
@@ -484,7 +521,7 @@ void GameState::playLure(int roomId) {
     eventLog.push_back(ss.str());
 }
 
-// Toggles one of the two office gates when the cursor is on KAD or KNOW.
+// Toggles an office gate when the cursor is on KAD, LIB, or KNOW.
 void GameState::toggleGate(int roomId) {
     if (roomId < 0 || roomId >= gameMap.totalRooms) {
         eventLog.push_back("Invalid room.");
@@ -500,6 +537,9 @@ void GameState::toggleGate(int roomId) {
     } else if (roomId == 4) {
         gate = &leftGateClosed;
         gateLabel = "KNOW office gate";
+    } else if (roomId == 2 && hasGraphEdge(gameMap, roomId, gameMap.officeId)) {
+        gate = &centerGateClosed;
+        gateLabel = "LIB center gate";
     } else {
         eventLog.push_back("No gate installed at this location.");
         turn--;
@@ -551,6 +591,6 @@ void GameState::updateProbMap() {
     }
 
     diffuseProbability(gameMap.rooms, probMap, gameMap.officeId,
-                       leftGateClosed, rightGateClosed);
+                       leftGateClosed, rightGateClosed, centerGateClosed);
     normalizeProbabilityMap(gameMap, probMap);
 }

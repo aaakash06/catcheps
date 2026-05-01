@@ -82,20 +82,18 @@ GameMap buildMap(Difficulty diff) {
         addEdge(gm, 8, 10);  // MW -- RHS
         addEdge(gm, 10, 12); // RHS -- JL
         addEdge(gm, 8, 7);   // MW -- HW
+        addEdge(gm, 7, 3);   // HW -- KAD
         addEdge(gm, 10, 5);  // RHS -- CYM
-        addEdge(gm, 12, 11); // JL -- RR
-        addEdge(gm, 7, 5);   // HW -- CYM
-        addEdge(gm, 5, 11);  // CYM -- RR
-        addEdge(gm, 7, 6);   // HW -- HC
-        addEdge(gm, 5, 2);   // CYM -- LIB
-        addEdge(gm, 3, 6);   // KAD -- HC
+        addEdge(gm, 5, 6);   // CYM -- HC
         addEdge(gm, 6, 2);   // HC -- LIB
-        addEdge(gm, 2, 1);   // LIB -- KKL
-        addEdge(gm, 6, 4);   // HC -- KNOW
-        addEdge(gm, 2, 9);   // LIB -- RM
-        addEdge(gm, 4, 9);   // KNOW -- RM
+        addEdge(gm, 12, 11); // JL -- RR
+        addEdge(gm, 11, 9);  // RR -- RM
+        addEdge(gm, 9, 4);   // RM -- KNOW
+        addEdge(gm, 6, 3);   // HC -- KAD
+        addEdge(gm, 6, 9);   // HC -- RM
         addEdge(gm, 0, 3);   // MB -- KAD
         addEdge(gm, 0, 4);   // MB -- KNOW
+        addEdge(gm, 0, 2);   // MB -- LIB
     }
 
     return gm;
@@ -119,11 +117,11 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
     }
 
     if (map.totalRooms == 13) {
-        if (group == 0) return "Top Floor";
-        if (group == 1) return "Left Side";
-        if (group == 2) return "Right Side";
-        if (group == 3) return "Center Hall";
-        if (group == 4) return "Near Office";
+        if (group == 0) return "Skyline";
+        if (group == 1) return "West Lane";
+        if (group == 2) return "Hub";
+        if (group == 3) return "East Lane";
+        if (group == 4) return "Gate Watch";
         return "?";
     }
 
@@ -131,13 +129,13 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
 }
 
 int effectiveCameraGroupCount(const GameMap &map) {
-    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 5)
-        return map.numCameraGroups;
-
     if (map.totalRooms == 8 || map.totalRooms == 10)
         return 4;
     if (map.totalRooms == 13)
         return 5;
+
+    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 5)
+        return map.numCameraGroups;
 
     return 0;
 }
@@ -170,18 +168,15 @@ bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
 
     // Overlapping strategic camera groups for HARD mode.
     if (map.totalRooms == 13) {
-        if (group == 0) return roomId == 8 || roomId == 10 || roomId == 12 ||
-                               roomId == 7 || roomId == 5 ||
-                               roomId == 11;                                  // MW, RHS, JL, HW, CYM, RR
-        if (group == 1) return roomId == 8 || roomId == 7 || roomId == 6 ||
-                               roomId == 3;                                   // MW, HW, HC, KAD
-        if (group == 2) return roomId == 12 || roomId == 11 || roomId == 1 ||
-                               roomId == 9;                                   // JL, RR, KKL, RM
-        if (group == 3) return roomId == 5 || roomId == 6 || roomId == 2 ||
-                               roomId == 4;                                   // CYM, HC, LIB, KNOW
-        if (group == 4) return roomId == 3 || roomId == 4 || roomId == 6 ||
-                               roomId == 2 || roomId == 1 ||
-                               roomId == 9;                                   // KAD, KNOW, HC, LIB, KKL, RM
+        if (group == 0) return roomId == 8 || roomId == 10 ||
+                               roomId == 12;                                  // MW, RHS, JL
+        if (group == 1) return roomId == 7 || roomId == 3;                   // HW, KAD
+        if (group == 2) return roomId == 5 || roomId == 6 ||
+                               roomId == 2;                                   // CYM, HC, LIB
+        if (group == 3) return roomId == 11 || roomId == 9 ||
+                               roomId == 4;                                   // RR, RM, KNOW
+        if (group == 4) return roomId == 3 || roomId == 4 ||
+                               roomId == 2;                                   // KAD, KNOW, LIB
         return false;
     }
 
@@ -200,12 +195,21 @@ int findSpawnRoom(const GameMap &map) {
     auto dist = bfsDistances(map.rooms, map.officeId);
     int maxDist = 0;
     for (auto &p : dist)
-        if (p.second > maxDist) maxDist = p.second;
+        if (p.first != map.officeId && p.second > maxDist) maxDist = p.second;
 
     std::vector<int> farRooms;
     for (auto &p : dist)
-        if (p.second == maxDist)
+        if (p.first != map.officeId && p.second == maxDist)
             farRooms.push_back(p.first);
+
+    if (farRooms.empty()) {
+        for (const Room &room : map.rooms)
+            if (!room.isOffice)
+                farRooms.push_back(room.id);
+    }
+
+    if (farRooms.empty())
+        return map.officeId;
 
     return farRooms[std::rand() % farRooms.size()];
 }

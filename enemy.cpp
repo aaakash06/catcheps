@@ -47,10 +47,11 @@ static int chooseNextRoom(const GameState &gs, const Enemy &enemy, bool *usedLur
 
     std::map<int, int> distToOffice = bfsDistances(gs.gameMap.rooms, gs.gameMap.officeId,
                                                    gs.gameMap.officeId,
-                                                   gs.leftGateClosed, gs.rightGateClosed);
+                                                   gs.leftGateClosed, gs.rightGateClosed,
+                                                   gs.centerGateClosed);
     std::map<int, int> distToLure = (enemy.lureTarget >= 0)
         ? bfsDistances(gs.gameMap.rooms, enemy.lureTarget, gs.gameMap.officeId,
-                       gs.leftGateClosed, gs.rightGateClosed)
+                       gs.leftGateClosed, gs.rightGateClosed, gs.centerGateClosed)
         : std::map<int, int>();
 
     int currentDist = distToOffice.count(enemy.currentRoom) ? distToOffice[enemy.currentRoom] : 999;

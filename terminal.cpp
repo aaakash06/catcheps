@@ -23,6 +23,7 @@ Key getKey() {
     if (read(STDIN_FILENO, &c, 1) != 1) return KEY_UNKNOWN;
 
     if (c == '\n' || c == '\r') return KEY_ENTER;
+    if (c == ' ') return KEY_SPACE;
     if (c == 27) { // ESC or arrow key
         char seq[2];
         if (read(STDIN_FILENO, &seq[0], 1) != 1) return KEY_ESCAPE;

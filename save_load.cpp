@@ -3,7 +3,8 @@
 #include <limits>
 #include <sstream>
 
-static const char *SAVE_MAGIC = "CW_SAVE_V3";
+static const char *SAVE_MAGIC = "CW_SAVE_V4";
+static const char *SAVE_MAGIC_V3 = "CW_SAVE_V3";
 static const char *SAVE_MAGIC_V2 = "CW_SAVE_V2";
 
 template <typename T>
@@ -16,6 +17,38 @@ static bool failLoad(GameState &gs, const std::string &message) {
     gs.eventLog.clear();
     gs.eventLog.push_back(message);
     return false;
+}
+
+static void normalizeLoadedProbabilityMap(GameState &gs) {
+    double total = 0.0;
+    for (int roomId = 0; roomId < gs.gameMap.totalRooms; roomId++) {
+        double value = gs.probMap.count(roomId) ? gs.probMap[roomId] : 0.0;
+        if (value < 0.0 || value != value)
+            value = 0.0;
+        gs.probMap[roomId] = value;
+        total += value;
+    }
+
+    if (total <= 0.0) {
+        for (int roomId = 0; roomId < gs.gameMap.totalRooms; roomId++)
+            gs.probMap[roomId] = 0.0;
+
+        if (gs.lastKnownEnemyRoom >= 0 && gs.lastKnownEnemyRoom < gs.gameMap.totalRooms) {
+            gs.probMap[gs.lastKnownEnemyRoom] = 1.0;
+            return;
+        }
+
+        if (gs.gameMap.totalRooms <= 0)
+            return;
+
+        double share = 1.0 / gs.gameMap.totalRooms;
+        for (int roomId = 0; roomId < gs.gameMap.totalRooms; roomId++)
+            gs.probMap[roomId] = share;
+        return;
+    }
+
+    for (int roomId = 0; roomId < gs.gameMap.totalRooms; roomId++)
+        gs.probMap[roomId] /= total;
 }
 
 // Saves the current game state to a plain-text file that can be reloaded later.
@@ -59,7 +92,8 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.gameMap.totalRooms << "\n";
     out << gs.gameMap.officeId << "\n";
     out << effectiveCameraGroupCount(gs.gameMap) << "\n";
-    out << gs.leftGateClosed << " " << gs.rightGateClosed << "\n";
+    out << gs.leftGateClosed << " " << gs.centerGateClosed << " "
+        << gs.rightGateClosed << "\n";
 
     for (size_t i = 0; i < gs.gameMap.rooms.size(); i++) {
         const Room &r = gs.gameMap.rooms[i];
@@ -90,9 +124,13 @@ bool loadGame(GameState &gs, const std::string &filename) {
 
     bool legacyFormat = false;
     bool version2Format = false;
+    bool version3Format = false;
     int diffInt = -1;
     if (firstToken == SAVE_MAGIC) {
         if (!readValue(in, diffInt)) return false;
+    } else if (firstToken == SAVE_MAGIC_V3) {
+        if (!readValue(in, diffInt)) return false;
+        version3Format = true;
     } else if (firstToken == SAVE_MAGIC_V2) {
         if (!readValue(in, diffInt)) return false;
         version2Format = true;
@@ -152,7 +190,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
         return false;
     }
 
-    if (firstToken == SAVE_MAGIC) {
+    if (firstToken == SAVE_MAGIC || version3Format) {
         if (!readValue(in, savedGateUpkeepCost))
             return failLoad(gs, "Save rejected: invalid gate upkeep state.");
     } else if (legacyFormat) {
@@ -172,7 +210,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
         return failLoad(gs, "Save rejected: invalid core tuning values.");
     }
 
-    if (firstToken == SAVE_MAGIC) {
+    if (firstToken == SAVE_MAGIC || version3Format) {
         if (!readValue(in, savedLureDurationTurns) ||
             !readValue(in, savedLureWeightMultiplier)) {
             return failLoad(gs, "Save rejected: invalid lure tuning values.");
@@ -256,7 +294,15 @@ bool loadGame(GameState &gs, const std::string &filename) {
 
     gs.gameMap.rooms.clear();
     gs.gameMap.rooms.resize(gs.gameMap.totalRooms);
-    if (!readValue(in, gs.leftGateClosed) || !readValue(in, gs.rightGateClosed))
+    if (!readValue(in, gs.leftGateClosed))
+        return failLoad(gs, "Save rejected: invalid gate state.");
+    if (firstToken == SAVE_MAGIC) {
+        if (!readValue(in, gs.centerGateClosed))
+            return failLoad(gs, "Save rejected: invalid gate state.");
+    } else {
+        gs.centerGateClosed = false;
+    }
+    if (!readValue(in, gs.rightGateClosed))
         return failLoad(gs, "Save rejected: invalid gate state.");
 
     in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -293,12 +339,19 @@ bool loadGame(GameState &gs, const std::string &filename) {
         int roomId;
         double prob;
         if (!readValue(in, roomId) || !readValue(in, prob) ||
-            roomId < 0 || roomId >= gs.gameMap.totalRooms || prob < 0.0) {
+            roomId < 0 || roomId >= gs.gameMap.totalRooms || prob < 0.0 ||
+            prob != prob) {
             return failLoad(gs, "Save rejected: invalid probability map data.");
         }
         gs.probMap[roomId] = prob;
     }
 
+    GameMap currentMap = buildMap(gs.difficulty);
+    if (gs.gameMap.totalRooms != currentMap.totalRooms ||
+        gs.gameMap.officeId != currentMap.officeId) {
+        return failLoad(gs, "Save rejected: map does not match the selected difficulty.");
+    }
+    gs.gameMap = currentMap;
     gs.gameMap.numCameraGroups = effectiveCameraGroupCount(gs.gameMap);
     if (gs.gameMap.numCameraGroups <= 0 || gs.gameMap.numCameraGroups > 5)
         return failLoad(gs, "Save rejected: invalid camera cluster configuration.");
@@ -311,6 +364,11 @@ bool loadGame(GameState &gs, const std::string &filename) {
     if (gs.enemy.lastRoom < 0 || gs.enemy.lastRoom >= gs.gameMap.totalRooms)
         gs.enemy.lastRoom = gs.enemy.currentRoom;
 
+    if (gs.lastKnownEnemyRoom < 0 || gs.lastKnownEnemyRoom >= gs.gameMap.totalRooms) {
+        gs.lastKnownEnemyRoom = -1;
+        gs.lastKnownEnemyTurn = -9999;
+    }
+
     if (gs.enemy.lureTimer <= 0 ||
         gs.enemy.lureTarget < 0 ||
         gs.enemy.lureTarget >= gs.gameMap.totalRooms ||
@@ -321,6 +379,10 @@ bool loadGame(GameState &gs, const std::string &filename) {
 
     if (gs.enemy.state == INVESTIGATING && gs.enemy.lureTarget < 0)
         gs.enemy.state = ROAMING;
+    if (gs.enemy.state == LEGACY_ATTACKING || gs.enemy.state == AT_OFFICE)
+        gs.enemy.state = ROAMING;
+
+    normalizeLoadedProbabilityMap(gs);
 
     gs.status = STATUS_PLAYING;
     gs.statusMessage = "";

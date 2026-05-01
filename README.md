@@ -1,7 +1,7 @@
 # Camera Watch - HKU Campus
 
 ## Overview
-Camera Watch is a terminal-based survival / strategy game inspired by Five Nights-style information management. The player defends Main Building (`MB`) by scanning camera clusters, performing exact room scans, using lures, and controlling the two office gates at `KNOW` and `KAD`.
+Camera Watch is a terminal-based survival / strategy game inspired by Five Nights-style information management. The player defends Main Building (`MB`) by scanning camera clusters, performing exact room scans, using lures, and controlling office gates at key approach buildings.
 
 The goal is to survive until 6 AM across multiple nights while managing limited energy and incomplete information.
 
@@ -18,7 +18,7 @@ Run the executable from the repository root so the ASCII templates in `maps/` ca
 ## Controls
 - `Arrow Keys`: move the cursor between connected buildings
 - `Enter`: Deep Scan the selected building
-- `G`: toggle the gate at the selected building (`KNOW` / `KAD` only)
+- `G`: toggle the gate at the selected building (`KAD` / `KNOW`, plus `LIB` in Hard mode)
 - `A`: Quick Sweep a camera cluster
 - `L`: place a lure at the selected building
 - `W`: wait / listen
@@ -64,7 +64,8 @@ Example:
 
 ## Gate Control
 - Gates are controlled with the cursor and `G`
-- `KNOW` and `KAD` are the only gate nodes
+- `KAD` and `KNOW` are the standard gate nodes
+- Hard mode adds a third center gate at `LIB`
 - Closing a gate costs energy
 - Opening a gate costs `0` energy but still uses the turn
 - There is no command to close both gates at once
@@ -88,8 +89,8 @@ Example:
 - Quick Sweep: `2%`
 - Deep Scan: `5%`
 - Gate close cost: `2%`
-- Door upkeep: `2%` per turn while the gate stays closed
-- Lure: `5%`
+- Door upkeep: `1%` per turn while the gate stays closed
+- Lure: `4%`
 
 ### Wait Rule
 `Wait / Listen` is intentionally free.
@@ -103,6 +104,7 @@ Example:
 - `0` closed gates = `0` door upkeep
 - `1` closed gate = upkeep for `1`
 - `2` closed gates = upkeep for `2`
+- Hard mode can have `3` closed gates = upkeep for `3`
 - this upkeep applies every turn while a gate remains closed, including `Wait` turns
 
 This keeps waiting free as an action, but closed gates still tax the power grid.
@@ -184,8 +186,8 @@ Each turn, the enemy chooses among legal neighboring rooms using:
 - random: `10%`
 
 #### Hard
-- closer: `75%`
-- sideways: `15%`
+- closer: `70%`
+- sideways: `20%`
 - random: `10%`
 
 This makes the enemy feel like it is stalking the player instead of wandering aimlessly, while still allowing some unpredictability on Easy and Normal.
@@ -209,8 +211,8 @@ This makes the enemy feel like it is stalking the player instead of wandering ai
 - lure weight multiplier: `2.75x`
 
 #### Hard
-- cost: `5%`
-- cooldown: `5` turns
+- cost: `4%`
+- cooldown: `4` turns
 - duration: `2` turns
 - lure weight multiplier: `3.0x`
 
@@ -231,6 +233,8 @@ This makes the enemy feel like it is stalking the player instead of wandering ai
 - weak audio support
 - almost no stale signal memory
 - strongly office-seeking enemy
+- 12 active-building Trident map: Skyline opens into West, Center, and East lanes, with `HC` as the main mid-map transfer hub
+- `MB` is reachable through three gate rooms: `KAD`, `LIB`, and `KNOW`
 
 ## Save / Load
 - The game saves to `camerawatch_save.txt`

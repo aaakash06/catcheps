@@ -11,25 +11,29 @@ struct Room;
 std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst,
                                  int officeId = 0,
                                  bool leftGateClosed = false,
-                                 bool rightGateClosed = false);
+                                 bool rightGateClosed = false,
+                                 bool centerGateClosed = false);
 
 // BFS distance from src to every other room. Returns map of room->distance.
 std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
                                 int officeId = 0,
                                 bool leftGateClosed = false,
-                                bool rightGateClosed = false);
+                                bool rightGateClosed = false,
+                                bool centerGateClosed = false);
 
 // Find articulation points in the graph. Returns room IDs that are articulation points.
 std::vector<int> findArticulationPoints(const std::vector<Room> &rooms,
                                         int officeId = 0,
                                         bool leftGateClosed = false,
-                                        bool rightGateClosed = false);
+                                        bool rightGateClosed = false,
+                                        bool centerGateClosed = false);
 
 // Find bridges in the graph. Returns pairs of (u, v) edges that are bridges.
 std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
                                              int officeId = 0,
                                              bool leftGateClosed = false,
-                                             bool rightGateClosed = false);
+                                             bool rightGateClosed = false,
+                                             bool centerGateClosed = false);
 
 // Diffuse a probability distribution over the graph for one step.
 // probMap: room->probability (should sum to ~1.0).
@@ -37,7 +41,8 @@ std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
 void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap,
                         int officeId = 0,
                         bool leftGateClosed = false,
-                        bool rightGateClosed = false);
+                        bool rightGateClosed = false,
+                        bool centerGateClosed = false);
 
 // Compute danger level for each room based on distance to office and enemy proximity.
 // Returns map of room->danger (0.0 to 1.0).
@@ -46,6 +51,7 @@ std::map<int, double> computeDangerLevels(const std::vector<Room> &rooms,
                                            int enemyLastKnown,
                                            const std::map<int, double> &probMap,
                                            bool leftGateClosed = false,
-                                           bool rightGateClosed = false);
+                                           bool rightGateClosed = false,
+                                           bool centerGateClosed = false);
 
 #endif

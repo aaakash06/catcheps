@@ -35,6 +35,7 @@ struct GameState {
     double lureWeightMultiplier;
     int currentLureCooldown;
     bool leftGateClosed;
+    bool centerGateClosed;
     bool rightGateClosed;
 
     GameMap gameMap;
