@@ -49,7 +49,7 @@ static std::string initialEnemyLog(const GameState &gs, int roomId) {
         return "Enemy detected at " + roomCode + ".";
     if (gs.difficulty == NORMAL)
         return "Movement detected near the " + groupLabel + ": " + roomCode + " area.";
-    return groupLabel + " sensor triggered. Source unknown.";
+    return "Enemy detected at " + roomCode + ".";
 }
 
 static int primaryClusterForRoom(const GameMap &map, int roomId) {
@@ -159,8 +159,8 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.lureDurationTurns = 3;
         gs.lureWeightMultiplier = 2.5;
     } else if (diff == NORMAL) {
-        gs.totalNights = 4;
-        gs.maxTurns = 35;
+        gs.totalNights = 2;
+        gs.maxTurns = 25;
         gs.cameraPowerCost = 2;
         gs.deepScanPowerCost = 4;
         gs.lurePowerCost = 4;
@@ -251,13 +251,8 @@ void GameState::newNight(bool preserveEventLog) {
     turn = 0;
     int spawn = findSpawnRoom(gameMap);
     enemy.init(spawn, difficulty);
-    if (difficulty == HARD) {
-        lastKnownEnemyRoom = -1;
-        lastKnownEnemyTurn = -9999;
-    } else {
-        lastKnownEnemyRoom = spawn;
-        lastKnownEnemyTurn = 0;
-    }
+    lastKnownEnemyRoom = spawn;
+    lastKnownEnemyTurn = 0;
     lastScanOutput.clear();
     currentLureCooldown = 0;
     leftGateClosed = false;
@@ -265,24 +260,9 @@ void GameState::newNight(bool preserveEventLog) {
     gameMap.numCameraGroups = effectiveCameraGroupCount(gameMap);
 
     probMap.clear();
-    if (difficulty == HARD) {
-        int startGroup = primaryClusterForRoom(gameMap, spawn);
-        std::vector<int> startRooms = roomsInGroup(gameMap, startGroup);
-        if (startRooms.empty()) {
-            for (size_t i = 0; i < gameMap.rooms.size(); i++)
-                probMap[(int)i] = 1.0 / gameMap.totalRooms;
-        } else {
-            double share = 1.0 / startRooms.size();
-            for (size_t i = 0; i < gameMap.rooms.size(); i++)
-                probMap[(int)i] = 0.0;
-            for (size_t i = 0; i < startRooms.size(); i++)
-                probMap[startRooms[i]] = share;
-        }
-    } else {
-        for (size_t i = 0; i < gameMap.rooms.size(); i++)
-            probMap[(int)i] = 0.0;
-        probMap[spawn] = 1.0;
-    }
+    for (size_t i = 0; i < gameMap.rooms.size(); i++)
+        probMap[(int)i] = 0.0;
+    probMap[spawn] = 1.0;
 
     std::stringstream ss;
     ss << "--- Night " << currentNight << " begins ---";

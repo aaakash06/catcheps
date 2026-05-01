@@ -300,7 +300,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
     }
 
     gs.gameMap.numCameraGroups = effectiveCameraGroupCount(gs.gameMap);
-    if (gs.gameMap.numCameraGroups <= 0 || gs.gameMap.numCameraGroups > 4)
+    if (gs.gameMap.numCameraGroups <= 0 || gs.gameMap.numCameraGroups > 5)
         return failLoad(gs, "Save rejected: invalid camera cluster configuration.");
 
     if (gs.enemy.currentRoom < 0 || gs.enemy.currentRoom >= gs.gameMap.totalRooms)

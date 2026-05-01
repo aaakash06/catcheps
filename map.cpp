@@ -37,7 +37,7 @@ GameMap buildMap(Difficulty diff) {
 
     gm.totalRooms = n;
     gm.officeId = 0; // MB is always the office
-    gm.numCameraGroups = 4;
+    gm.numCameraGroups = (diff == HARD) ? 5 : 4;
 
     gm.rooms.resize(n);
     for (int i = 0; i < n; i++) {
@@ -111,18 +111,19 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
     }
 
     if (map.totalRooms == 10) {
-        if (group == 0) return "North Link";
-        if (group == 1) return "West Flank";
-        if (group == 2) return "East Corridor";
-        if (group == 3) return "Doorstep";
+        if (group == 0) return "Skyline";
+        if (group == 1) return "Central Hub";
+        if (group == 2) return "West Side";
+        if (group == 3) return "East Side";
         return "?";
     }
 
     if (map.totalRooms == 13) {
-        if (group == 0) return "Upper Perimeter";
-        if (group == 1) return "Central Hubs";
-        if (group == 2) return "West Access";
-        if (group == 3) return "East Access";
+        if (group == 0) return "Top Floor";
+        if (group == 1) return "Left Side";
+        if (group == 2) return "Right Side";
+        if (group == 3) return "Center Hall";
+        if (group == 4) return "Near Office";
         return "?";
     }
 
@@ -130,11 +131,13 @@ std::string cameraGroupLabel(const GameMap &map, int group) {
 }
 
 int effectiveCameraGroupCount(const GameMap &map) {
-    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 4)
+    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 5)
         return map.numCameraGroups;
 
-    if (map.totalRooms == 8 || map.totalRooms == 10 || map.totalRooms == 13)
+    if (map.totalRooms == 8 || map.totalRooms == 10)
         return 4;
+    if (map.totalRooms == 13)
+        return 5;
 
     return 0;
 }
@@ -156,21 +159,29 @@ bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
 
     // Overlapping strategic camera groups for NORMAL mode.
     if (map.totalRooms == 10) {
-        if (group == 0) return roomId == 8 || roomId == 5 || roomId == 9; // MW, CYM, RM
-        if (group == 1) return roomId == 9 || roomId == 2 || roomId == 1; // RM, LIB, KKL
-        if (group == 2) return roomId == 5 || roomId == 7 || roomId == 6; // CYM, HW, HC
-        if (group == 3) return roomId == 4 || roomId == 3;                 // KNOW, KAD
+        if (group == 0) return roomId == 8 || roomId == 9 || roomId == 5 ||
+                               roomId == 7;                                 // MW, RM, CYM, HW
+        if (group == 1) return roomId == 5 || roomId == 2 || roomId == 6; // CYM, LIB, HC
+        if (group == 2) return roomId == 9 || roomId == 1 || roomId == 2 ||
+                               roomId == 4;                                 // RM, KKL, LIB, KNOW
+        if (group == 3) return roomId == 7 || roomId == 6 || roomId == 3; // HW, HC, KAD
         return false;
     }
 
     // Overlapping strategic camera groups for HARD mode.
     if (map.totalRooms == 13) {
         if (group == 0) return roomId == 8 || roomId == 10 || roomId == 12 ||
-                               roomId == 7 || roomId == 11;                 // MW, RHS, JL, HW, RR
-        if (group == 1) return roomId == 5 || roomId == 6 || roomId == 2 ||
-                               roomId == 1;                                  // CYM, HC, LIB, KKL
-        if (group == 2) return roomId == 7 || roomId == 6 || roomId == 3;   // HW, HC, KAD
-        if (group == 3) return roomId == 9 || roomId == 4;                   // RM, KNOW
+                               roomId == 7 || roomId == 5 ||
+                               roomId == 11;                                  // MW, RHS, JL, HW, CYM, RR
+        if (group == 1) return roomId == 8 || roomId == 7 || roomId == 6 ||
+                               roomId == 3;                                   // MW, HW, HC, KAD
+        if (group == 2) return roomId == 12 || roomId == 11 || roomId == 1 ||
+                               roomId == 9;                                   // JL, RR, KKL, RM
+        if (group == 3) return roomId == 5 || roomId == 6 || roomId == 2 ||
+                               roomId == 4;                                   // CYM, HC, LIB, KNOW
+        if (group == 4) return roomId == 3 || roomId == 4 || roomId == 6 ||
+                               roomId == 2 || roomId == 1 ||
+                               roomId == 9;                                   // KAD, KNOW, HC, LIB, KKL, RM
         return false;
     }
 
