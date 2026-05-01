@@ -37,7 +37,7 @@ GameMap buildMap(Difficulty diff) {
 
     gm.totalRooms = n;
     gm.officeId = 0; // MB is always the office
-    gm.numCameraGroups = 3;
+    gm.numCameraGroups = (diff == HARD) ? 5 : 4;
 
     gm.rooms.resize(n);
     for (int i = 0; i < n; i++) {
@@ -45,68 +45,148 @@ GameMap buildMap(Difficulty diff) {
         gm.rooms[i].abbrev = allBuildings[i].abbrev;
         gm.rooms[i].name = allBuildings[i].name;
         gm.rooms[i].isOffice = allBuildings[i].isOffice;
-        gm.rooms[i].doorClosed = false;
         gm.rooms[i].isCamera = true;
     }
 
-    // Camera groups:
-    // 0=Upper: MW(8), RM(9), RHS(10), RR(11), JL(12)
-    // 1=Central: HC(6), HW(7), CYM(5)
-    // 2=Lower: LIB(2), KKL(1), KAD(3), KNOW(4), MB(0)
-    int groups13[] = {2, 2, 2, 2, 2, 1, 1, 1, 0, 0, 0, 0, 0};
+    // Primary/default camera groups.
+    // Normal mode uses overlapping helper-based groups below, so these are only
+    // a fallback / default assignment.
+    int groups13[] = {-1, 2, 1, 0, 0, 2, 1, 2, 2, 2, 2, 2, 2};
     for (int i = 0; i < n; i++)
         gm.rooms[i].cameraGroup = groups13[i];
 
-    // Edges — built incrementally so subsets remain connected
-
-    // Core edges (always present, rooms 0-7 for EASY)
-    addEdge(gm, 0, 3);  // MB -- KAD
-    addEdge(gm, 0, 4);  // MB -- KNOW
-    addEdge(gm, 3, 2);  // KAD -- LIB
-    addEdge(gm, 3, 6);  // KAD -- HC
-    addEdge(gm, 2, 1);  // LIB -- KKL
-    addEdge(gm, 2, 4);  // LIB -- KNOW
-    addEdge(gm, 2, 6);  // LIB -- HC
-    addEdge(gm, 6, 5);  // HC -- CYM
-    addEdge(gm, 6, 7);  // HC -- HW
-    addEdge(gm, 1, 5);  // KKL -- CYM
-
-    if (n >= 10) {
-        // NORMAL+: add MW(8), RM(9) connections
+    if (diff == EASY) {
+        addEdge(gm, 0, 3);  // MB -- KAD
+        addEdge(gm, 0, 4);  // MB -- KNOW
+        addEdge(gm, 3, 6);  // KAD -- HC
+        addEdge(gm, 6, 5);  // HC -- CYM
+        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 7, 5);  // HW -- CYM
+        addEdge(gm, 2, 4);  // LIB -- KNOW
+        addEdge(gm, 2, 1);  // LIB -- KKL
+        addEdge(gm, 2, 6);  // LIB -- HC
+    } else if (diff == NORMAL) {
+        addEdge(gm, 0, 3);  // MB -- KAD
+        addEdge(gm, 0, 4);  // MB -- KNOW
+        addEdge(gm, 3, 6);  // KAD -- HC
+        addEdge(gm, 6, 5);  // HC -- CYM
+        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 7, 5);  // HW -- CYM
+        addEdge(gm, 2, 4);  // LIB -- KNOW
+        addEdge(gm, 2, 1);  // LIB -- KKL
+        addEdge(gm, 2, 6);  // LIB -- HC
+        addEdge(gm, 2, 9);  // LIB -- RM
         addEdge(gm, 7, 8);  // HW -- MW
-        addEdge(gm, 8, 9);  // MW -- RM
-        addEdge(gm, 6, 9);  // HC -- RM
-    }
-
-    if (n >= 13) {
-        // HARD: add RHS(10), RR(11), JL(12)
-        addEdge(gm, 9, 10);  // RM -- RHS
-        addEdge(gm, 10, 11); // RHS -- RR
-        addEdge(gm, 11, 12); // RR -- JL
+        addEdge(gm, 5, 9);  // CYM -- RM
+    } else {
+        addEdge(gm, 8, 10);  // MW -- RHS
+        addEdge(gm, 10, 12); // RHS -- JL
+        addEdge(gm, 8, 7);   // MW -- HW
+        addEdge(gm, 7, 3);   // HW -- KAD
+        addEdge(gm, 10, 5);  // RHS -- CYM
+        addEdge(gm, 5, 6);   // CYM -- HC
+        addEdge(gm, 6, 2);   // HC -- LIB
+        addEdge(gm, 12, 11); // JL -- RR
+        addEdge(gm, 11, 9);  // RR -- RM
+        addEdge(gm, 9, 4);   // RM -- KNOW
+        addEdge(gm, 6, 3);   // HC -- KAD
+        addEdge(gm, 6, 9);   // HC -- RM
+        addEdge(gm, 0, 3);   // MB -- KAD
+        addEdge(gm, 0, 4);   // MB -- KNOW
+        addEdge(gm, 0, 2);   // MB -- LIB
     }
 
     return gm;
 }
 
-std::string roomStatusChar(const Room &r, int enemyRoom, int lastKnown) {
-    if (r.isOffice) return "[SAFE]";
-    if (r.doorClosed) return "[X]";
-    if (r.id == enemyRoom) return "[!]";
-    if (r.id == lastKnown) return "[?]";
-    return "[ ]";
+std::string cameraGroupLabel(const GameMap &map, int group) {
+    if (map.totalRooms == 8) {
+        if (group == 0) return "West";
+        if (group == 1) return "East";
+        if (group == 2) return "Nexus";
+        if (group == 3) return "Threshold";
+        return "?";
+    }
+
+    if (map.totalRooms == 10) {
+        if (group == 0) return "Skyline";
+        if (group == 1) return "Central Hub";
+        if (group == 2) return "West Side";
+        if (group == 3) return "East Side";
+        return "?";
+    }
+
+    if (map.totalRooms == 13) {
+        if (group == 0) return "Skyline";
+        if (group == 1) return "West Lane";
+        if (group == 2) return "Hub";
+        if (group == 3) return "East Lane";
+        if (group == 4) return "Gate Watch";
+        return "?";
+    }
+
+    return "?";
 }
 
-std::string cameraGroupLabel(int group) {
-    if (group == 0) return "Upper";
-    if (group == 1) return "Central";
-    if (group == 2) return "Lower";
-    return "?";
+int effectiveCameraGroupCount(const GameMap &map) {
+    if (map.totalRooms == 8 || map.totalRooms == 10)
+        return 4;
+    if (map.totalRooms == 13)
+        return 5;
+
+    if (map.numCameraGroups >= 1 && map.numCameraGroups <= 5)
+        return map.numCameraGroups;
+
+    return 0;
+}
+
+bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
+    if (roomId < 0 || roomId >= map.totalRooms) return false;
+
+    if (roomId == map.officeId) return false;
+
+    // Overlapping strategic camera groups for EASY mode.
+    if (map.totalRooms == 8) {
+        if (group == 0) return roomId == 1 || roomId == 2 || roomId == 4;      // KKL, LIB, KNOW
+        if (group == 1) return roomId == 7 || roomId == 5 || roomId == 6 ||
+                               roomId == 3;                                     // HW, CYM, HC, KAD
+        if (group == 2) return roomId == 2 || roomId == 6;                       // LIB, HC
+        if (group == 3) return roomId == 4 || roomId == 3;                       // KNOW, KAD
+        return false;
+    }
+
+    // Overlapping strategic camera groups for NORMAL mode.
+    if (map.totalRooms == 10) {
+        if (group == 0) return roomId == 8 || roomId == 9 || roomId == 5 ||
+                               roomId == 7;                                 // MW, RM, CYM, HW
+        if (group == 1) return roomId == 5 || roomId == 2 || roomId == 6; // CYM, LIB, HC
+        if (group == 2) return roomId == 9 || roomId == 1 || roomId == 2 ||
+                               roomId == 4;                                 // RM, KKL, LIB, KNOW
+        if (group == 3) return roomId == 7 || roomId == 6 || roomId == 3; // HW, HC, KAD
+        return false;
+    }
+
+    // Overlapping strategic camera groups for HARD mode.
+    if (map.totalRooms == 13) {
+        if (group == 0) return roomId == 8 || roomId == 10 ||
+                               roomId == 12;                                  // MW, RHS, JL
+        if (group == 1) return roomId == 7 || roomId == 3;                   // HW, KAD
+        if (group == 2) return roomId == 5 || roomId == 6 ||
+                               roomId == 2;                                   // CYM, HC, LIB
+        if (group == 3) return roomId == 11 || roomId == 9 ||
+                               roomId == 4;                                   // RR, RM, KNOW
+        if (group == 4) return roomId == 3 || roomId == 4 ||
+                               roomId == 2;                                   // KAD, KNOW, LIB
+        return false;
+    }
+
+    return map.rooms[roomId].cameraGroup == group;
 }
 
 std::vector<int> roomsInGroup(const GameMap &map, int group) {
     std::vector<int> result;
     for (auto &r : map.rooms)
-        if (r.cameraGroup == group)
+        if (roomInCameraGroup(map, r.id, group))
             result.push_back(r.id);
     return result;
 }
@@ -115,12 +195,21 @@ int findSpawnRoom(const GameMap &map) {
     auto dist = bfsDistances(map.rooms, map.officeId);
     int maxDist = 0;
     for (auto &p : dist)
-        if (p.second > maxDist) maxDist = p.second;
+        if (p.first != map.officeId && p.second > maxDist) maxDist = p.second;
 
     std::vector<int> farRooms;
     for (auto &p : dist)
-        if (p.second >= maxDist - 1)
+        if (p.first != map.officeId && p.second == maxDist)
             farRooms.push_back(p.first);
+
+    if (farRooms.empty()) {
+        for (const Room &room : map.rooms)
+            if (!room.isOffice)
+                farRooms.push_back(room.id);
+    }
+
+    if (farRooms.empty())
+        return map.officeId;
 
     return farRooms[std::rand() % farRooms.size()];
 }

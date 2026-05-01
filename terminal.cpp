@@ -40,12 +40,8 @@ Key getKey() {
     }
     if (c == 'w' || c == 'W') return KEY_W;
     if (c == 'a' || c == 'A') return KEY_A;
-    if (c == 's' || c == 'S') return KEY_S;
-    if (c == 'd' || c == 'D') return KEY_D;
-    if (c == 'c' || c == 'C') return KEY_C;
+    if (c == 'g' || c == 'G') return KEY_G;
     if (c == 'l' || c == 'L') return KEY_L;
-    if (c == 'r' || c == 'R') return KEY_R;
-    if (c == 'e' || c == 'E') return KEY_E;
     if (c == 'q' || c == 'Q') return KEY_Q;
     if (c == 'h' || c == 'H') return KEY_H;
     if (c == '0') return KEY_0;
@@ -53,7 +49,7 @@ Key getKey() {
     if (c == '2') return KEY_2;
     if (c == '3') return KEY_3;
     if (c == '4') return KEY_4;
-    if (c == '.') return KEY_DOT;
+    if (c == '5') return KEY_5;
     if (c == '?') return KEY_QUESTION;
 
     return KEY_UNKNOWN;

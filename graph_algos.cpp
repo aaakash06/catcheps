@@ -5,7 +5,29 @@
 #include <algorithm>
 #include <cmath>
 
-std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst) {
+// Returns whether a graph edge is currently blocked by an office gate.
+static bool isBlockedOfficeEdge(int officeId, bool leftGateClosed, bool rightGateClosed,
+                                bool centerGateClosed, int from, int to) {
+    const int LIB = 2;
+    const int KAD = 3;
+    const int KNOW = 4;
+
+    if ((from == officeId && to == KNOW) || (from == KNOW && to == officeId))
+        return leftGateClosed;
+
+    if ((from == officeId && to == KAD) || (from == KAD && to == officeId))
+        return rightGateClosed;
+
+    if ((from == officeId && to == LIB) || (from == LIB && to == officeId))
+        return centerGateClosed;
+
+    return false;
+}
+
+// Computes a shortest path on the room graph while respecting blocked office edges.
+std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst,
+                                 int officeId, bool leftGateClosed, bool rightGateClosed,
+                                 bool centerGateClosed) {
     if (src < 0 || src >= (int)rooms.size() || dst < 0 || dst >= (int)rooms.size())
         return {};
 
@@ -21,7 +43,9 @@ std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int ds
         if (cur == dst) break;
 
         for (int nb : rooms[cur].neighbors) {
-            if (!visited[nb] && !rooms[cur].doorClosed) {
+            if (!visited[nb] &&
+                !isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
+                                     centerGateClosed, cur, nb)) {
                 visited[nb] = true;
                 prev[nb] = cur;
                 q.push(nb);
@@ -38,7 +62,10 @@ std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int ds
     return path;
 }
 
-std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src) {
+// Computes shortest-path distances from one source room to every reachable room.
+std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
+                                int officeId, bool leftGateClosed, bool rightGateClosed,
+                                bool centerGateClosed) {
     std::map<int, int> dist;
     if (src < 0 || src >= (int)rooms.size()) return dist;
 
@@ -52,7 +79,9 @@ std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src) {
         int cur = q.front();
         q.pop();
         for (int nb : rooms[cur].neighbors) {
-            if (!visited[nb] && !rooms[cur].doorClosed) {
+            if (!visited[nb] &&
+                !isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
+                                     centerGateClosed, cur, nb)) {
                 visited[nb] = true;
                 dist[nb] = dist[cur] + 1;
                 q.push(nb);
@@ -62,7 +91,10 @@ std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src) {
     return dist;
 }
 
+// DFS helper shared by articulation-point and bridge detection.
 static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
+                  int officeId, bool leftGateClosed, bool rightGateClosed,
+                  bool centerGateClosed,
                   std::vector<int> &disc, std::vector<int> &low,
                   std::vector<int> &parent, std::vector<bool> &isAP,
                   std::vector<std::pair<int,int>> &bridges) {
@@ -70,12 +102,14 @@ static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
     int children = 0;
 
     for (int v : rooms[u].neighbors) {
-        if (rooms[u].doorClosed) continue;
+        if (isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
+                                centerGateClosed, u, v)) continue;
 
         if (disc[v] == -1) {
             children++;
             parent[v] = u;
-            apDfs(rooms, v, timer, disc, low, parent, isAP, bridges);
+            apDfs(rooms, v, timer, officeId, leftGateClosed, rightGateClosed,
+                  centerGateClosed, disc, low, parent, isAP, bridges);
             low[u] = std::min(low[u], low[v]);
 
             if (parent[u] == -1 && children > 1)
@@ -91,7 +125,10 @@ static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
     }
 }
 
-std::vector<int> findArticulationPoints(const std::vector<Room> &rooms) {
+// Finds articulation points that would disconnect parts of the current campus graph.
+std::vector<int> findArticulationPoints(const std::vector<Room> &rooms,
+                                        int officeId, bool leftGateClosed, bool rightGateClosed,
+                                        bool centerGateClosed) {
     int n = rooms.size();
     std::vector<int> disc(n, -1), low(n, -1), parent(n, -1);
     std::vector<bool> isAP(n, false);
@@ -100,7 +137,8 @@ std::vector<int> findArticulationPoints(const std::vector<Room> &rooms) {
 
     for (int i = 0; i < n; i++)
         if (disc[i] == -1)
-            apDfs(rooms, i, timer, disc, low, parent, isAP, bridges);
+            apDfs(rooms, i, timer, officeId, leftGateClosed, rightGateClosed,
+                  centerGateClosed, disc, low, parent, isAP, bridges);
 
     std::vector<int> result;
     for (int i = 0; i < n; i++)
@@ -108,7 +146,10 @@ std::vector<int> findArticulationPoints(const std::vector<Room> &rooms) {
     return result;
 }
 
-std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms) {
+// Finds bridge edges whose removal would disconnect part of the current graph.
+std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms,
+                                             int officeId, bool leftGateClosed, bool rightGateClosed,
+                                             bool centerGateClosed) {
     int n = rooms.size();
     std::vector<int> disc(n, -1), low(n, -1), parent(n, -1);
     std::vector<bool> isAP(n, false);
@@ -117,12 +158,16 @@ std::vector<std::pair<int, int>> findBridges(const std::vector<Room> &rooms) {
 
     for (int i = 0; i < n; i++)
         if (disc[i] == -1)
-            apDfs(rooms, i, timer, disc, low, parent, isAP, bridges);
+            apDfs(rooms, i, timer, officeId, leftGateClosed, rightGateClosed,
+                  centerGateClosed, disc, low, parent, isAP, bridges);
 
     return bridges;
 }
 
-void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap) {
+// Diffuses one step of enemy-location probability mass across legal graph edges.
+void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &probMap,
+                        int officeId, bool leftGateClosed, bool rightGateClosed,
+                        bool centerGateClosed) {
     std::map<int, double> next;
     for (size_t i = 0; i < rooms.size(); i++)
         next[i] = 0.0;
@@ -132,7 +177,8 @@ void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &p
 
         std::vector<int> openNeighbors;
         for (int nb : rooms[i].neighbors)
-            if (!rooms[i].doorClosed)
+            if (!isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
+                                     centerGateClosed, (int)i, nb))
                 openNeighbors.push_back(nb);
 
         if (openNeighbors.empty()) {
@@ -150,12 +196,18 @@ void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &p
     probMap = next;
 }
 
+// Combines office distance, current probability, and last-known proximity into
+// a coarse danger score per room.
 std::map<int, double> computeDangerLevels(const std::vector<Room> &rooms,
                                            int officeId,
                                            int enemyLastKnown,
-                                           const std::map<int, double> &probMap) {
+                                           const std::map<int, double> &probMap,
+                                           bool leftGateClosed,
+                                           bool rightGateClosed,
+                                           bool centerGateClosed) {
     std::map<int, double> danger;
-    auto distFromOffice = bfsDistances(rooms, officeId);
+    auto distFromOffice = bfsDistances(rooms, officeId, officeId,
+                                       leftGateClosed, rightGateClosed, centerGateClosed);
 
     int maxDist = 1;
     for (auto &p : distFromOffice)
@@ -172,7 +224,9 @@ std::map<int, double> computeDangerLevels(const std::vector<Room> &rooms,
 
         double proximity = 0.0;
         if (enemyLastKnown >= 0) {
-            auto path = bfsShortestPath(rooms, enemyLastKnown, i);
+            auto path = bfsShortestPath(rooms, enemyLastKnown, i,
+                                        officeId, leftGateClosed, rightGateClosed,
+                                        centerGateClosed);
             if (!path.empty())
                 proximity = 1.0 / (1.0 + path.size());
         }

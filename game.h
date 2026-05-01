@@ -8,12 +8,7 @@
 #include "enemy.h"
 
 enum GameStatus { STATUS_PLAYING, STATUS_WIN, STATUS_LOSE_ENEMY, STATUS_LOSE_POWER };
-
-struct CameraSighting {
-    int roomId;
-    bool enemyPresent;
-    std::string status;
-};
+enum SignalStrength { SIGNAL_NONE, SIGNAL_WEAK, SIGNAL_STRONG };
 
 struct GameState {
     Difficulty difficulty;
@@ -23,21 +18,33 @@ struct GameState {
     int maxTurns;        // turns per night (6AM arrival)
     int power;
     int maxPower;
-    int cameraPowerCost;
+    int cameraPowerCost;      // Quick Sweep cost
+    int deepScanPowerCost;    // Deep Scan cost
     int lurePowerCost;
-    int doorPowerCost;
-    int scanPowerCost;
-    int lureCooldown;
+    int gateClosePowerCost;
+    int gateUpkeepPowerCost;
+    int signalDecayTurns;
+    int audioProbDistance3;
+    int audioProbDistance2;
+    int audioProbDistance1;
+    int moveCloserProb;
+    int moveSidewaysProb;
+    int moveRandomProb;
     int lureCooldownMax;
+    int lureDurationTurns;
+    double lureWeightMultiplier;
     int currentLureCooldown;
+    bool leftGateClosed;
+    bool centerGateClosed;
+    bool rightGateClosed;
 
     GameMap gameMap;
     Enemy enemy;
 
     int lastKnownEnemyRoom;
+    int lastKnownEnemyTurn;
     std::map<int, double> probMap;
-    std::vector<CameraSighting> lastCameraCheck;
-    int lastCameraGroupChecked;
+    std::vector<std::string> lastScanOutput;
 
     GameStatus status;
     std::string statusMessage;
@@ -47,19 +54,22 @@ struct GameState {
 
     GameState();
     void init(Difficulty diff);
-    void newNight();
+    void newNight(bool preserveEventLog = false);
     void doTurn(int action, int param);
     void enemyTurn();
     void checkConditions();
-    void checkCamera(int group);
-    void playLure(int group);
-    void closeDoor(int roomId);
-    void restoreDoor(int roomId);
-    void riskScan();
+    void quickSweep(int group);
+    void deepScan(int roomId);
+    void playLure(int roomId);
+    void toggleGate(int roomId);
     void updateProbMap();
+    void finishSuccessfulTurn(int action);
 };
 
 // Difficulty parameters
 void setDifficultyParams(GameState &gs, Difficulty diff);
+bool isBlockedEdge(const GameState& gs, int from, int to);
+SignalStrength getSignalStrength(const GameState &gs);
+std::string getSignalDisplay(const GameState &gs);
 
 #endif

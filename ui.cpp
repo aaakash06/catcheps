@@ -2,7 +2,9 @@
 #include "terminal.h"
 #include <unistd.h>
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <sstream>
 #include <cstdlib>
@@ -38,219 +40,235 @@ static std::string powerBar(int power, int maxPower) {
     return bar;
 }
 
-// Map layout: each building has a fixed (col, row) position for ASCII rendering
+static std::string lureStatusText(const GameState &gs) {
+    if (gs.enemy.lureTimer > 0 &&
+        gs.enemy.lureTarget >= 0 &&
+        gs.enemy.lureTarget < gs.gameMap.totalRooms) {
+        std::stringstream ss;
+        ss << "Active at " << gs.gameMap.rooms[gs.enemy.lureTarget].abbrev
+           << " (" << gs.enemy.lureTimer << " turns left)";
+        return ss.str();
+    }
+    return "None";
+}
+
+static std::string lureCooldownText(const GameState &gs) {
+    if (gs.currentLureCooldown > 0) {
+        std::stringstream ss;
+        ss << "available in " << gs.currentLureCooldown << " turns";
+        return ss.str();
+    }
+    return "Ready";
+}
+
+// Cursor navigation uses a simple spatial layout derived from the rendered map template.
 struct MapPos { int id; int col; int row; };
 
-static std::vector<MapPos> getLayout(int totalRooms) {
-    // Positions for all 13 buildings on a grid
-    // Layout designed so all graph edges are either same-row or 1-row-apart
-    // Row 0: MW(8)           RHS(10)  RR(11)  JL(12)
-    // Row 1: HW(7)  RM(9)             CYM(5)
-    // Row 2: KAD(3) HC(6)   LIB(2)    KKL(1)
-    // Row 3: MB(0)           KNOW(4)
-    MapPos all[] = {
-        {0,   0, 3},  // MB
-        {1,  32, 2},  // KKL
-        {2,  24, 2},  // LIB
-        {3,   0, 2},  // KAD
-        {4,  24, 3},  // KNOW
-        {5,  24, 1},  // CYM
-        {6,   8, 2},  // HC
-        {7,   0, 1},  // HW
-        {8,   0, 0},  // MW
-        {9,   8, 1},  // RM
-        {10, 16, 0},  // RHS
-        {11, 24, 0},  // RR
-        {12, 32, 0},  // JL
-    };
+static std::vector<MapPos> getFallbackLayout(int totalRooms) {
+    if (totalRooms <= 8) {
+        return {
+            {7, 14, 0},  // HW
+            {5, 32, 0},  // CYM
+            {3,  0, 2},  // KAD
+            {6, 16, 2},  // HC
+            {0,  0, 4},  // MB
+            {2, 16, 4},  // LIB
+            {1, 32, 4},  // KKL
+            {4,  0, 6},  // KNOW
+        };
+    }
 
-    std::vector<MapPos> result;
-    for (int i = 0; i < totalRooms; i++) {
-        for (auto &p : all) {
-            if (p.id == i) {
-                result.push_back(p);
-                break;
+    if (totalRooms <= 10) {
+        return {
+            {8, 26, 0},  // MW
+            {7, 12, 2},  // HW
+            {5, 30, 2},  // CYM
+            {9, 48, 2},  // RM
+            {3,  0, 4},  // KAD
+            {6, 16, 4},  // HC
+            {2, 30, 4},  // LIB
+            {1, 46, 4},  // KKL
+            {0,  0, 6},  // MB
+            {4,  0, 8},  // KNOW
+        };
+    }
+
+    return {
+        {8,   7,  2},  // MW
+        {10, 32,  2},  // RHS
+        {12, 57,  2},  // JL
+        {7,   7,  7},  // HW
+        {5,  32,  7},  // CYM
+        {11, 57,  7},  // RR
+        {3,   7, 12},  // KAD
+        {6,  32, 12},  // HC
+        {9,  57, 12},  // RM
+        {2,  32, 16},  // LIB
+        {4,  57, 16},  // KNOW
+        {0,  32, 22},  // MB
+        {1,  82, 16},  // KKL, hidden on Hard 3-gate map but kept navigable if connected later
+    };
+}
+
+static std::string padRoomCode(const std::string &code) {
+    std::string padded = code;
+    while ((int)padded.size() < 4)
+        padded += ' ';
+    return padded;
+}
+
+static std::vector<std::string> loadMapTemplate(const std::string &filename) {
+    std::ifstream in(filename.c_str());
+    std::vector<std::string> lines;
+    std::string line;
+    while (std::getline(in, line))
+        lines.push_back(line);
+    if (lines.empty())
+        lines.push_back("Map template unavailable: " + filename);
+    return lines;
+}
+
+static std::string mapTemplateFileForDifficulty(Difficulty diff) {
+    if (diff == NORMAL) return "maps/map_normal.txt";
+    if (diff == HARD) return "maps/map_hard.txt";
+    return "maps/map_easy.txt";
+}
+
+static std::vector<MapPos> getLayoutFromTemplate(const GameState &gs) {
+    std::vector<std::string> mapLines = loadMapTemplate(mapTemplateFileForDifficulty(gs.difficulty));
+    std::vector<MapPos> layout;
+    std::vector<MapPos> fallback = getFallbackLayout(gs.gameMap.totalRooms);
+    std::map<int, MapPos> fallbackById;
+
+    for (const auto &pos : fallback)
+        fallbackById[pos.id] = pos;
+
+    for (const Room &room : gs.gameMap.rooms) {
+        std::string placeholder = "{" + padRoomCode(room.abbrev) + "}";
+        bool found = false;
+
+        for (size_t row = 0; row < mapLines.size() && !found; row++) {
+            std::string::size_type col = mapLines[row].find(placeholder);
+            if (col != std::string::npos) {
+                layout.push_back({room.id, (int)col, (int)row});
+                found = true;
             }
         }
+
+        // Some difficulty maps intentionally hide isolated/unused graph rooms.
+        // Keep template positions for visible rooms instead of falling back wholesale.
+        if (!found && fallbackById.count(room.id))
+            layout.push_back(fallbackById[room.id]);
     }
-    return result;
+
+    return layout.empty() ? fallback : layout;
 }
 
-// Render a building label with status coloring (fixed 6-char width)
-static std::string buildingLabel(const Room &r, int enemyRoom, int lastKnown, bool isCursor) {
-    std::string label = r.abbrev;
-    while ((int)label.size() < 4) label += " ";
+static void replaceAll(std::string &line, const std::string &target, const std::string &replacement) {
+    if (target.empty()) return;
+    std::string::size_type pos = 0;
+    while ((pos = line.find(target, pos)) != std::string::npos) {
+        line.replace(pos, target.size(), replacement);
+        pos += replacement.size();
+    }
+}
 
-    std::string color = CLR_RESET;
-    if (isCursor) {
-        color = CLR_CYAN CLR_BOLD;
-    } else if (r.doorClosed) {
-        color = CLR_BLUE;
-    } else if (r.id == enemyRoom) {
-        color = CLR_RED CLR_BOLD;
-    } else if (r.id == lastKnown) {
-        color = CLR_YELLOW;
-    } else if (r.isOffice) {
+static std::string renderRoom(const GameState &gs, const Room &room, bool isCursor) {
+    std::string padded = padRoomCode(room.abbrev);
+    SignalStrength signal = getSignalStrength(gs);
+    bool strongSignal = (signal == SIGNAL_STRONG && room.id == gs.lastKnownEnemyRoom);
+    bool weakSignal = (signal == SIGNAL_WEAK && room.id == gs.lastKnownEnemyRoom);
+
+    std::string color = CLR_DIM;
+    std::string left = " ";
+    std::string right = " ";
+
+    if (room.isOffice) {
         color = CLR_GREEN;
+        left = "<";
+        right = ">";
+    } else if (strongSignal) {
+        std::string signalColor = isCursor ? std::string(CLR_CYAN CLR_BOLD)
+                                           : std::string(CLR_RED);
+        return signalColor + "[!!  ]" + CLR_RESET;
+    } else if (weakSignal) {
+        color = CLR_YELLOW;
+        left = "[";
+        right = "]";
+        padded = "?   ";
     }
 
-    std::string brackL = "[";
-    std::string brackR = "]";
-    if (r.isOffice) { brackL = "<"; brackR = ">"; }
+    if (isCursor)
+        color = CLR_CYAN CLR_BOLD;
 
-    return color + brackL + label + brackR + CLR_RESET;
+    return color + left + padded + right + CLR_RESET;
 }
 
-// Pad to a specific column position
-static void padTo(int currentCol, int targetCol) {
-    for (int i = currentCol; i < targetCol; i++)
-        std::cout << ' ';
+static std::string renderGateMarker(bool closed) {
+    if (closed)
+        return std::string(CLR_RED) + "[XX]" + CLR_RESET;
+    return std::string(CLR_GREEN) + "[--]" + CLR_RESET;
+}
+
+static bool roomConnectsToOffice(const GameState &gs, int roomId) {
+    if (roomId < 0 || roomId >= gs.gameMap.totalRooms)
+        return false;
+
+    const std::vector<int> &neighbors = gs.gameMap.rooms[roomId].neighbors;
+    return std::find(neighbors.begin(), neighbors.end(), gs.gameMap.officeId) != neighbors.end();
 }
 
 void drawMap(const GameState &gs, int cursorRoom) {
-    auto layout = getLayout(gs.gameMap.totalRooms);
-    if (layout.empty()) return;
-
-    // Build position lookup
-    std::map<int, MapPos> posMap;
-    for (auto &p : layout) posMap[p.id] = p;
-
-    int maxRow = 0;
-    for (auto &p : layout)
-        if (p.row > maxRow) maxRow = p.row;
-
-    // Group buildings by row, sorted by col. Find first/last non-empty rows.
-    std::vector<std::vector<int>> rowBldgs(maxRow + 1);
-    for (auto &p : layout)
-        rowBldgs[p.row].push_back(p.id);
-    for (auto &row : rowBldgs)
-        std::sort(row.begin(), row.end(), [&](int a, int b) {
-            return posMap[a].col < posMap[b].col;
-        });
-
-    // Find first and last non-empty rows
-    int firstRow = 0, lastRow = maxRow;
-    while (firstRow < maxRow && rowBldgs[firstRow].empty()) firstRow++;
-    while (lastRow > 0 && rowBldgs[lastRow].empty()) lastRow--;
-
-    // Build a character buffer
-    // Only include rows from firstRow to lastRow
-    int numRows = lastRow - firstRow + 1;
-    int scrW = 42;
-    int scrH = numRows * 2 - 1;
-    std::vector<std::string> scr(scrH, std::string(scrW, ' '));
-
-    auto setCh = [&](int r, int c, char ch) {
-        if (r >= 0 && r < scrH && c >= 0 && c < scrW)
-            scr[r][c] = ch;
-    };
-
-    // Stamp buildings (as plain text — we'll colorize during output)
-    for (auto &p : layout) {
-        if (rowBldgs[p.row].empty()) continue;
-        int sr = (p.row - firstRow) * 2;
-        std::string label = "[";
-        std::string abbr = gs.gameMap.rooms[p.id].abbrev;
-        while ((int)abbr.size() < 4) abbr += " ";
-        if (gs.gameMap.rooms[p.id].isOffice) label = "<";
-        for (int i = 0; i < 4 && p.col + i < scrW; i++)
-            setCh(sr, p.col + 1 + i, abbr[i]);
-        setCh(sr, p.col, label[0]);
-        setCh(sr, p.col + 5, gs.gameMap.rooms[p.id].isOffice ? '>' : ']');
-    }
-
-    // Stamp connections
-    for (auto &r : gs.gameMap.rooms) {
-        for (int nb : r.neighbors) {
-            if (nb <= r.id) continue;
-            if (posMap.find(r.id) == posMap.end() || posMap.find(nb) == posMap.end()) continue;
-            MapPos &pa = posMap[r.id], &pb = posMap[nb];
-
-            bool blocked = r.doorClosed || gs.gameMap.rooms[nb].doorClosed;
-            char ch = blocked ? 'x' : '-';
-
-            if (pa.row == pb.row) {
-                // Horizontal: dashes between buildings
-                int minC = pa.col + 6;
-                int maxC = pb.col - 1;
-                int sr = (pa.row - firstRow) * 2;
-                for (int c = minC; c <= maxC; c++)
-                    setCh(sr, c, ch);
-            } else {
-                // Vertical/diagonal connection
-                int topRow = std::min(pa.row, pb.row);
-                int botRow = std::max(pa.row, pb.row);
-                int connRow = (topRow - firstRow) * 2 + 1;
-                int colA = pa.col + 2;
-                int colB = pb.col + 2;
-                char hCh = blocked ? 'x' : '-';
-                char vCh = blocked ? 'x' : '|';
-
-                // Only draw if both rows are in the visible range
-                if (botRow - topRow == 1 && connRow >= 0 && connRow < scrH) {
-                    // Horizontal on connector row if needed
-                    if (colA != colB) {
-                        int minC = std::min(colA, colB);
-                        int maxC = std::max(colA, colB);
-                        for (int c = minC; c <= maxC; c++)
-                            setCh(connRow, c, hCh);
-                    } else {
-                        setCh(connRow, colA, vCh);
-                    }
-                }
-            }
+    std::vector<std::string> mapLines = loadMapTemplate(mapTemplateFileForDifficulty(gs.difficulty));
+    for (std::string line : mapLines) {
+        bool hardSwappedOfficeSides = (gs.difficulty == HARD);
+        bool leftVisualGateClosed = hardSwappedOfficeSides ? gs.rightGateClosed
+                                                           : gs.leftGateClosed;
+        bool rightVisualGateClosed = hardSwappedOfficeSides ? gs.leftGateClosed
+                                                            : gs.rightGateClosed;
+        replaceAll(line, "{LG}", renderGateMarker(leftVisualGateClosed));
+        replaceAll(line, "{RG}", renderGateMarker(rightVisualGateClosed));
+        replaceAll(line, "{CG}", renderGateMarker(gs.centerGateClosed));
+        replaceAll(line, "[LG]", renderGateMarker(leftVisualGateClosed));
+        replaceAll(line, "[RG]", renderGateMarker(rightVisualGateClosed));
+        replaceAll(line, "[CG]", renderGateMarker(gs.centerGateClosed));
+        for (const Room &room : gs.gameMap.rooms) {
+            replaceAll(line, "{" + padRoomCode(room.abbrev) + "}",
+                       renderRoom(gs, room, room.id == cursorRoom));
         }
+        std::cout << "  " << line << "\n";
     }
 
-    // Output with colorization
-    for (int sr = 0; sr < scrH; sr++) {
-        std::cout << "  ";
-        for (int c = 0; c < scrW; c++) {
-            // Check if this position is inside a building label
-            int bldgId = -1;
-            for (auto &p : layout) {
-                int pSr = (p.row - firstRow) * 2;
-                if (pSr == sr && c >= p.col && c < p.col + 6) {
-                    bldgId = p.id;
-                    break;
-                }
-            }
-
-            if (bldgId >= 0 && c == posMap[bldgId].col) {
-                // Start of building — print colored label
-                std::cout << buildingLabel(gs.gameMap.rooms[bldgId],
-                                            gs.enemy.currentRoom,
-                                            gs.lastKnownEnemyRoom,
-                                            bldgId == cursorRoom);
-                c += 5; // skip the rest of the label
-            } else {
-                std::cout << scr[sr][c];
-            }
-        }
-        std::cout << "\n";
+    std::cout << CLR_DIM << "  Office Gates: ";
+    if (roomConnectsToOffice(gs, 3)) {
+        std::cout << "KAD " << renderGateMarker(gs.rightGateClosed)
+                  << CLR_DIM << "  ";
     }
+    if (roomConnectsToOffice(gs, 2)) {
+        std::cout << "LIB " << renderGateMarker(gs.centerGateClosed)
+                  << CLR_DIM << "  ";
+    }
+    if (roomConnectsToOffice(gs, 4)) {
+        std::cout << "KNOW " << renderGateMarker(gs.leftGateClosed);
+    }
+    std::cout << CLR_RESET << "\n";
 
-    // Legend
-    std::cout << CLR_DIM << "  " << CLR_GREEN << "<MB>" << CLR_RESET << CLR_DIM
-              << "=Office  " << CLR_RED << "[!!]" << CLR_RESET << CLR_DIM
-              << "=Enemy  " << CLR_YELLOW << "[??]" << CLR_RESET << CLR_DIM
-              << "=Last Seen  " << CLR_BLUE << "[XX]" << CLR_RESET << CLR_DIM
-              << "=Door  " << CLR_CYAN << "[CUR]" << CLR_RESET << CLR_DIM
-              << "=Cursor" << CLR_RESET << "\n";
+    std::cout << CLR_DIM << "  "
+              << CLR_GREEN << "<MB>" << CLR_RESET << CLR_DIM << "=Office  "
+              << CLR_RED << "[!!]" << CLR_RESET << CLR_DIM << "=Strong Signal  "
+              << CLR_YELLOW << "[?]" << CLR_RESET << CLR_DIM << "=Weak Signal  "
+              << CLR_GREEN << "[--]" << CLR_RESET << CLR_DIM << "=Office Gate Open  "
+              << CLR_RED << "[XX]" << CLR_RESET << CLR_DIM << "=Office Gate Closed  "
+              << CLR_CYAN << "[CUR]" << CLR_RESET << CLR_DIM << "=Cursor"
+              << CLR_RESET << "\n";
 }
 
 void drawCameraFeed(const GameState &gs) {
-    if (gs.lastCameraCheck.empty()) return;
+    if (gs.lastScanOutput.empty()) return;
 
-    std::cout << CLR_BOLD << "  Camera " << cameraGroupLabel(gs.lastCameraGroupChecked)
-              << " Feed:" << CLR_RESET << "\n";
-    for (auto &cs : gs.lastCameraCheck) {
-        std::string roomName = gs.gameMap.rooms[cs.roomId].abbrev;
-        if (cs.enemyPresent)
-            std::cout << "  " << CLR_RED << "[!!] " << roomName << ": " << cs.status << CLR_RESET << "\n";
-        else
-            std::cout << "  " << CLR_GREEN << "[OK] " << roomName << ": " << cs.status << CLR_RESET << "\n";
-    }
+    std::cout << CLR_BOLD << "  Scan Result:" << CLR_RESET << "\n";
+    for (size_t i = 0; i < gs.lastScanOutput.size(); i++)
+        std::cout << "  " << CLR_CYAN << gs.lastScanOutput[i] << CLR_RESET << "\n";
     std::cout << "\n";
 }
 
@@ -261,14 +279,17 @@ void drawGame(const GameState &gs, int cursorRoom) {
     std::cout << CLR_BOLD;
     std::cout << "================================================================\n";
     std::cout << "  NIGHT " << gs.currentNight << "/" << gs.totalNights
-              << "   TURN " << gs.turn << "/" << gs.maxTurns
-              << "   POWER: " << gs.power << "/" << gs.maxPower
-              << " " << powerBar(gs.power, gs.maxPower) << "\n";
-    bool officeSafe = (gs.enemy.currentRoom != gs.gameMap.officeId);
-    std::cout << "  OFFICE: " << (officeSafe ? CLR_GREEN "SAFE" : CLR_RED "BREACHED!") << CLR_RESET;
-    if (gs.currentLureCooldown > 0)
-        std::cout << CLR_YELLOW << "   Lure CD: " << gs.currentLureCooldown << CLR_RESET;
-    std::cout << "\n";
+              << "   TURN " << gs.turn << "/" << gs.maxTurns << "\n";
+    std::cout << "  ENERGY: " << (gs.maxPower > 0 ? (gs.power * 100 / gs.maxPower) : 0)
+              << "% " << powerBar(gs.power, gs.maxPower) << "\n";
+    std::cout << "  DOORS: KAD " << (gs.rightGateClosed ? CLR_RED "CLOSED" : CLR_GREEN "OPEN");
+    if (roomConnectsToOffice(gs, 2))
+        std::cout << CLR_RESET << "   LIB " << (gs.centerGateClosed ? CLR_RED "CLOSED" : CLR_GREEN "OPEN");
+    std::cout << CLR_RESET << "   KNOW " << (gs.leftGateClosed ? CLR_RED "CLOSED" : CLR_GREEN "OPEN")
+              << CLR_RESET << "\n";
+    std::cout << "  LURE: " << CLR_CYAN << lureStatusText(gs) << CLR_RESET
+              << "   NEXT LURE: " << CLR_YELLOW << lureCooldownText(gs) << CLR_RESET << "\n";
+    std::cout << "  LAST KNOWN SIGNAL: " << CLR_YELLOW << getSignalDisplay(gs) << CLR_RESET << "\n";
     std::cout << "================================================================\n";
     std::cout << CLR_RESET;
 
@@ -288,24 +309,29 @@ void drawGame(const GameState &gs, int cursorRoom) {
     // Action bar
     std::cout << "\n" CLR_BOLD;
     std::cout << "================================================================\n";
-    std::cout << CLR_CYAN << "  [C]" CLR_RESET << CLR_BOLD "amera  "
-              << CLR_CYAN << "[L]" CLR_RESET << CLR_BOLD "ure  "
-              << CLR_CYAN << "[D]" CLR_RESET << CLR_BOLD "oor  "
-              << CLR_CYAN << "[R]" CLR_RESET << CLR_BOLD "estore  "
-              << CLR_CYAN << "[S]" CLR_RESET << CLR_BOLD "can  "
-              << CLR_CYAN << "[E]" CLR_RESET << CLR_BOLD "nd turn  "
-              << CLR_CYAN << "[Q]" CLR_RESET << CLR_BOLD "uit  "
-              << CLR_CYAN << "[H]" CLR_RESET << CLR_BOLD "elp\n";
-
-    // Cursor info
+    std::cout << CLR_CYAN << "  [A]" CLR_RESET << CLR_BOLD " Quick Sweep  "
+              << CLR_CYAN << "[ENTER]" CLR_RESET << CLR_BOLD " Deep Scan selected building\n";
+    std::cout << CLR_CYAN << "  [G]" CLR_RESET << CLR_BOLD " Toggle gate at cursor  "
+              << CLR_CYAN << "[L]" CLR_RESET << CLR_BOLD " Use Lure at cursor  "
+              << CLR_CYAN << "[W]" CLR_RESET << CLR_BOLD " Wait / Listen  "
+              << CLR_CYAN << "[Q]" CLR_RESET << CLR_BOLD " Quit  "
+              << CLR_CYAN << "[H]" CLR_RESET << CLR_BOLD " Help\n";
+    std::cout << "  Move: " CLR_CYAN "Arrow Keys" CLR_RESET
+              << "   Sweep Menu: " CLR_CYAN "Number Keys + Enter" CLR_RESET "\n";
     if (cursorRoom >= 0 && cursorRoom < gs.gameMap.totalRooms) {
-        auto &curRoom = gs.gameMap.rooms[cursorRoom];
+        const Room &curRoom = gs.gameMap.rooms[cursorRoom];
         std::cout << "  Cursor: " << CLR_CYAN << curRoom.abbrev << CLR_RESET
                   << " (" << curRoom.name << ")";
-        if (curRoom.doorClosed) std::cout << CLR_BLUE " [DOOR CLOSED]" CLR_RESET;
+        if (cursorRoom == 3)
+            std::cout << (gs.rightGateClosed ? CLR_RED " [KAD GATE CLOSED]" : CLR_DIM " [KAD GATE OPEN]") << CLR_RESET;
+        else if (cursorRoom == 2 && roomConnectsToOffice(gs, 2))
+            std::cout << (gs.centerGateClosed ? CLR_RED " [LIB GATE CLOSED]" : CLR_DIM " [LIB GATE OPEN]") << CLR_RESET;
+        else if (cursorRoom == 4)
+            std::cout << (gs.leftGateClosed ? CLR_RED " [KNOW GATE CLOSED]" : CLR_DIM " [KNOW GATE OPEN]") << CLR_RESET;
+        else
+            std::cout << CLR_DIM << " [No gate here]" << CLR_RESET;
+        std::cout << "\n";
     }
-    std::cout << "\n";
-    std::cout << "  Navigate: " CLR_CYAN "Arrow Keys" CLR_RESET "   Select: " CLR_CYAN "Enter" CLR_RESET "\n";
     std::cout << "================================================================\n";
     std::cout << CLR_RESET;
 }
@@ -339,14 +365,10 @@ void drawDifficultyMenu() {
     std::cout << "================================================================\n";
     std::cout << "                    SELECT DIFFICULTY\n";
     std::cout << "================================================================\n\n";
-    std::cout << CLR_CYAN << "  [1]" CLR_RESET " " CLR_BOLD "Easy" CLR_RESET "   - 8 buildings, 3 nights, high power\n";
-    std::cout << CLR_CYAN << "  [2]" CLR_RESET " " CLR_BOLD "Normal" CLR_RESET " - 10 buildings, 4 nights, moderate power\n";
-    std::cout << CLR_CYAN << "  [3]" CLR_RESET " " CLR_BOLD "Hard" CLR_RESET "   - 13 buildings, 5 nights, low power\n";
+    std::cout << CLR_CYAN << "  [1]" CLR_RESET " " CLR_BOLD "Easy" CLR_RESET "   - 8 buildings, 2 nights, forgiving scans\n";
+    std::cout << CLR_CYAN << "  [2]" CLR_RESET " " CLR_BOLD "Normal" CLR_RESET " - 10 buildings, 2 nights, balanced routes\n";
+    std::cout << CLR_CYAN << "  [3]" CLR_RESET " " CLR_BOLD "Hard" CLR_RESET "   - 12 active buildings, 2 nights, three gates\n";
     std::cout << "\n================================================================\n";
-}
-
-void drawRiskScan(const GameState &) {
-    // Risk scan output is handled via event log
 }
 
 void drawEndGame(const GameState &gs) {
@@ -377,11 +399,12 @@ void drawEndGame(const GameState &gs) {
     std::cout << "\n================================================================\n";
     std::cout << CLR_RESET;
     std::cout << "  Press Enter to return to main menu...\n";
-    initTerminal();
-    // Wait for Enter
-    char c;
-    while (read(0, &c, 1) == 1 && c != '\n') {}
-    restoreTerminal();
+    // Terminal is already in raw mode while the game loop is running.
+    while (true) {
+        Key k = getKey();
+        if (k == KEY_ENTER)
+            break;
+    }
 }
 
 void drawHelp() {
@@ -393,33 +416,38 @@ void drawHelp() {
     std::cout << CLR_RESET;
     std::cout << "  OBJECTIVE:\n";
     std::cout << "  Survive each night until 6 AM by monitoring\n";
-    std::cout << "  cameras and redirecting the intruder away from\n";
+    std::cout << "  temporary camera scans and redirecting the intruder away from\n";
     std::cout << "  " CLR_GREEN "Main Building (MB)" CLR_RESET " — your office.\n\n";
     std::cout << CLR_BOLD << "  CONTROLS:\n" CLR_RESET;
-    std::cout << "  Arrow Keys - Move cursor on map\n";
-    std::cout << "  Enter      - Close door at cursor\n";
-    std::cout << "  " CLR_CYAN "C" CLR_RESET " - Check camera group\n";
-    std::cout << "  " CLR_CYAN "L" CLR_RESET " - Play sound lure at group\n";
-    std::cout << "  " CLR_CYAN "D" CLR_RESET " - Close door at cursor building\n";
-    std::cout << "  " CLR_CYAN "R" CLR_RESET " - Restore door at cursor building\n";
-    std::cout << "  " CLR_CYAN "S" CLR_RESET " - Risk scan (analyze map)\n";
-    std::cout << "  " CLR_CYAN "E" CLR_RESET " - End turn (wait)\n";
-    std::cout << "  " CLR_CYAN "Q" CLR_RESET " - Save & quit\n\n";
-    std::cout << CLR_BOLD << "  CAMERA GROUPS:\n" CLR_RESET;
-    std::cout << "  " CLR_YELLOW "Upper" CLR_RESET " - MW, RM, RHS, RR, JL\n";
-    std::cout << "  " CLR_YELLOW "Central" CLR_RESET " - HC, HW, CYM\n";
-    std::cout << "  " CLR_YELLOW "Lower" CLR_RESET " - MB, KKL, LIB, KAD, KNOW\n\n";
+    std::cout << "  Arrow Keys        - Move cursor between connected buildings\n";
+    std::cout << "  Enter             - Deep Scan the selected building\n";
+    std::cout << "  " CLR_CYAN "[A]" CLR_RESET " - Quick Sweep a camera cluster\n";
+    std::cout << "  " CLR_CYAN "[G]" CLR_RESET " - Toggle the gate at the selected building\n";
+    std::cout << "  " CLR_CYAN "[L]" CLR_RESET " - Place a lure at the selected building\n";
+    std::cout << "  " CLR_CYAN "[W]" CLR_RESET " - Wait / listen\n";
+    std::cout << "  " CLR_CYAN "[H]" CLR_RESET " - Open this help screen\n";
+    std::cout << "  " CLR_CYAN "[Q]" CLR_RESET " - Save & quit\n\n";
+    std::cout << CLR_BOLD << "  CAMERA RINGS:\n" CLR_RESET;
+    std::cout << "  - Quick Sweep reports movement in one cluster only.\n";
+    std::cout << "  - Deep Scan checks the building under the cursor.\n";
+    std::cout << "  - MB is never part of a camera cluster.\n";
+    std::cout << "  - Signals decay after a few turns depending on difficulty.\n\n";
     std::cout << CLR_BOLD << "  TIPS:\n" CLR_RESET;
-    std::cout << "  - Use risk scans to find chokepoints.\n";
-    std::cout << "  - Close doors at HC to cut off paths.\n";
-    std::cout << "  - Lure the intruder to the upper campus.\n";
-    std::cout << "  - Manage power carefully!\n";
+    std::cout << "  - Quick Sweep is cheap but only tells you whether a cluster is active.\n";
+    std::cout << "  - Deep Scan is expensive, but it gives an exact last known signal.\n";
+    std::cout << "  - Gate rooms next to MB control the office entrances.\n";
+    std::cout << "  - Closed gates drain upkeep every turn, even while waiting.\n";
+    std::cout << "  - Audio hints help, but they are not a substitute for scanning.\n";
+    std::cout << "  - Lure: place a distraction at the selected building. If the enemy is nearby,\n";
+    std::cout << "    it may move toward the lure instead of the office.\n";
+    std::cout << "  - Manage energy carefully!\n";
     std::cout << "\n================================================================\n";
     std::cout << "  Press Enter to go back...\n";
-    initTerminal();
-    char c;
-    while (read(0, &c, 1) == 1 && c != '\n') {}
-    restoreTerminal();
+    while (true) {
+        Key k = getKey();
+        if (k == KEY_ENTER)
+            break;
+    }
 }
 
 int promptInt(const std::string &msg, int lo, int hi) {
@@ -442,9 +470,7 @@ void pause(const std::string &msg) {
 
 int getNextRoomNav(const GameState &gs, int currentCursor, int direction) {
     if (gs.gameMap.rooms.empty()) return 0;
-    // direction: 0=up, 1=down, 2=left, 3=right
-    // Find the layout positions
-    auto layout = getLayout(gs.gameMap.totalRooms);
+    auto layout = getLayoutFromTemplate(gs);
     MapPos *cur = nullptr;
     for (auto &p : layout) {
         if (p.id == currentCursor) { cur = &p; break; }
@@ -453,23 +479,27 @@ int getNextRoomNav(const GameState &gs, int currentCursor, int direction) {
 
     int bestId = currentCursor;
     int bestScore = 999999;
+    std::map<int, MapPos> posById;
+    for (const auto &p : layout)
+        posById[p.id] = p;
 
-    for (auto &p : layout) {
-        if (p.id == currentCursor) continue;
+    for (int neighborId : gs.gameMap.rooms[currentCursor].neighbors) {
+        if (!posById.count(neighborId)) continue;
+        const auto &p = posById[neighborId];
         int dr = p.row - cur->row;
         int dc = p.col - cur->col;
 
         bool valid = false;
-        if (direction == 0 && dr < 0) valid = true;      // up
-        if (direction == 1 && dr > 0) valid = true;      // down
-        if (direction == 2 && dc < 0) valid = true;      // left
-        if (direction == 3 && dc > 0) valid = true;      // right
+        if (direction == 0 && dr < 0) valid = true;
+        if (direction == 1 && dr > 0) valid = true;
+        if (direction == 2 && dc < 0) valid = true;
+        if (direction == 3 && dc > 0) valid = true;
 
         if (valid) {
-            int score = abs(dr) + abs(dc);
+            int score = abs(dr) * 100 + abs(dc);
             if (score < bestScore) {
                 bestScore = score;
-                bestId = p.id;
+                bestId = neighborId;
             }
         }
     }

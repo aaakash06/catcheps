@@ -23,9 +23,6 @@ void drawMap(const GameState &gs, int cursorRoom);
 // Draw camera check results.
 void drawCameraFeed(const GameState &gs);
 
-// Draw risk scan results.
-void drawRiskScan(const GameState &gs);
-
 // Draw end game screen.
 void drawEndGame(const GameState &gs);
 

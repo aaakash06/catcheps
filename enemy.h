@@ -6,23 +6,28 @@
 #include <string>
 #include "map.h"
 
-enum EnemyState { ROAMING, INVESTIGATING, ATTACKING, AT_OFFICE };
+struct GameState;
+
+enum EnemyState {
+    ROAMING = 0,
+    INVESTIGATING = 1,
+    // Reserved to keep older save files compatible with the previous enum layout.
+    LEGACY_ATTACKING = 2,
+    AT_OFFICE = 3
+};
 
 struct Enemy {
     int currentRoom;
     EnemyState state;
-    int alertLevel;      // 0-100
     int lureTarget;      // room id or -1
     int lureTimer;       // turns remaining on lure
     int lastRoom;        // previous room
-    double officeBias;   // how much the enemy gravitates toward office
-    double moveChance;   // probability of moving each turn (difficulty)
 
     Enemy();
     void init(int startRoom, Difficulty diff);
-    void move(const GameMap &map);
+    bool move(const GameState &gs);
     void applyLure(int targetRoom, int duration);
-    void tickLure();
+    bool tickLure();
 };
 
 #endif

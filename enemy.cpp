@@ -1,96 +1,134 @@
 #include "enemy.h"
+#include "game.h"
 #include "graph_algos.h"
 #include <cstdlib>
-#include <algorithm>
-#include <cmath>
+#include <map>
+#include <vector>
 
-Enemy::Enemy() : currentRoom(-1), state(ROAMING), alertLevel(0),
-    lureTarget(-1), lureTimer(0), lastRoom(-1), officeBias(0.1), moveChance(1.0) {}
+// Returns all legal next rooms after applying the office-gate edge blocks.
+static std::vector<int> getOpenNeighbors(const GameState &gs, int roomId) {
+    std::vector<int> result;
+    if (roomId < 0 || roomId >= gs.gameMap.totalRooms) return result;
 
-void Enemy::init(int startRoom, Difficulty diff) {
+    const std::vector<int> &neighbors = gs.gameMap.rooms[roomId].neighbors;
+    for (int nb : neighbors) {
+        if (!isBlockedEdge(gs, roomId, nb))
+            result.push_back(nb);
+    }
+    return result;
+}
+
+// Picks one room according to the provided non-negative weights.
+static int weightedChoice(const std::vector<int> &rooms, const std::vector<double> &weights) {
+    if (rooms.empty()) return -1;
+
+    double totalWeight = 0.0;
+    for (size_t i = 0; i < weights.size(); i++)
+        totalWeight += weights[i];
+
+    if (totalWeight <= 0.0)
+        return rooms[std::rand() % rooms.size()];
+
+    double roll = (double)(std::rand() % 10000) / 10000.0 * totalWeight;
+    double cumulative = 0.0;
+    for (size_t i = 0; i < rooms.size(); i++) {
+        cumulative += weights[i];
+        if (roll <= cumulative)
+            return rooms[i];
+    }
+    return rooms.back();
+}
+
+// Chooses the enemy's next room using distance-to-office categories plus lure bias.
+static int chooseNextRoom(const GameState &gs, const Enemy &enemy, bool *usedLureBias) {
+    std::vector<int> neighbors = getOpenNeighbors(gs, enemy.currentRoom);
+    if (usedLureBias) *usedLureBias = false;
+    if (neighbors.empty()) return enemy.currentRoom;
+
+    std::map<int, int> distToOffice = bfsDistances(gs.gameMap.rooms, gs.gameMap.officeId,
+                                                   gs.gameMap.officeId,
+                                                   gs.leftGateClosed, gs.rightGateClosed,
+                                                   gs.centerGateClosed);
+    std::map<int, int> distToLure = (enemy.lureTarget >= 0)
+        ? bfsDistances(gs.gameMap.rooms, enemy.lureTarget, gs.gameMap.officeId,
+                       gs.leftGateClosed, gs.rightGateClosed, gs.centerGateClosed)
+        : std::map<int, int>();
+
+    int currentDist = distToOffice.count(enemy.currentRoom) ? distToOffice[enemy.currentRoom] : 999;
+    std::vector<int> closer;
+    std::vector<int> sideways;
+
+    for (size_t i = 0; i < neighbors.size(); i++) {
+        int nb = neighbors[i];
+        int nbDist = distToOffice.count(nb) ? distToOffice[nb] : 999;
+        if (nbDist < currentDist)
+            closer.push_back(nb);
+        else if (nbDist == currentDist)
+            sideways.push_back(nb);
+    }
+
+    std::vector<double> weights(neighbors.size(), 0.0);
+    for (size_t i = 0; i < neighbors.size(); i++)
+        weights[i] += (double)gs.moveRandomProb / neighbors.size();
+
+    if (!closer.empty()) {
+        double share = (double)gs.moveCloserProb / closer.size();
+        for (size_t i = 0; i < neighbors.size(); i++) {
+            for (size_t j = 0; j < closer.size(); j++) {
+                if (neighbors[i] == closer[j])
+                    weights[i] += share;
+            }
+        }
+    }
+
+    if (!sideways.empty()) {
+        double share = (double)gs.moveSidewaysProb / sideways.size();
+        for (size_t i = 0; i < neighbors.size(); i++) {
+            for (size_t j = 0; j < sideways.size(); j++) {
+                if (neighbors[i] == sideways[j])
+                    weights[i] += share;
+            }
+        }
+    }
+
+    if (enemy.lureTimer > 0 && !distToLure.empty()) {
+        int currentLureDist = distToLure.count(enemy.currentRoom) ? distToLure[enemy.currentRoom] : 999;
+        for (size_t i = 0; i < neighbors.size(); i++) {
+            int nb = neighbors[i];
+            if (distToLure.count(nb) && distToLure[nb] < currentLureDist)
+                weights[i] *= gs.lureWeightMultiplier;
+        }
+    }
+
+    int chosen = weightedChoice(neighbors, weights);
+    if (usedLureBias && enemy.lureTimer > 0 && !distToLure.empty()) {
+        int currentLureDist = distToLure.count(enemy.currentRoom) ? distToLure[enemy.currentRoom] : 999;
+        if (distToLure.count(chosen) && distToLure[chosen] < currentLureDist)
+            *usedLureBias = true;
+    }
+    return chosen;
+}
+
+// Builds a reset enemy in an invalid room until a night spawn is assigned.
+Enemy::Enemy() : currentRoom(-1), state(ROAMING),
+    lureTarget(-1), lureTimer(0), lastRoom(-1) {}
+
+// Initializes the enemy for a new night using the selected difficulty.
+void Enemy::init(int startRoom, Difficulty) {
     currentRoom = startRoom;
     state = ROAMING;
-    alertLevel = 0;
     lureTarget = -1;
     lureTimer = 0;
     lastRoom = startRoom;
-
-    if (diff == EASY) {
-        officeBias = 0.08;
-        moveChance = 0.85;
-    } else if (diff == NORMAL) {
-        officeBias = 0.15;
-        moveChance = 0.92;
-    } else {
-        officeBias = 0.22;
-        moveChance = 1.0;
-    }
 }
 
-void Enemy::move(const GameMap &map) {
-    if (currentRoom < 0 || currentRoom >= map.totalRooms) return;
+// Moves the enemy exactly one step per turn when a legal graph move exists.
+bool Enemy::move(const GameState &gs) {
+    const GameMap &map = gs.gameMap;
+    if (currentRoom < 0 || currentRoom >= map.totalRooms) return false;
 
-    // Random chance to stay put based on difficulty
-    if ((double)(std::rand() % 100) / 100.0 > moveChance) return;
-
-    auto &room = map.rooms[currentRoom];
-    std::vector<int> candidates;
-    std::vector<double> weights;
-
-    for (int nb : room.neighbors) {
-        if (room.doorClosed) continue;
-        // Don't allow going back to where we just were unless it's the only option
-        candidates.push_back(nb);
-    }
-
-    if (candidates.empty()) return;
-
-    // Compute weights
-    auto distToOffice = bfsDistances(map.rooms, map.officeId);
-    auto distToLure = (lureTarget >= 0) ? bfsDistances(map.rooms, lureTarget) : std::map<int,int>();
-
-    for (int nb : candidates) {
-        double w = 1.0;
-
-        // Prefer rooms closer to office (office bias)
-        if (distToOffice.count(nb) && distToOffice.count(currentRoom)) {
-            if (distToOffice[nb] < distToOffice[currentRoom])
-                w += officeBias * 3.0;
-            else if (distToOffice[nb] == distToOffice[currentRoom])
-                w += officeBias;
-        }
-
-        // Strong preference toward lure
-        if (lureTimer > 0 && !distToLure.empty() && distToLure.count(nb)) {
-            if (distToLure[nb] < (distToLure.count(currentRoom) ? distToLure[currentRoom] : 999))
-                w += 2.0;
-        }
-
-        // Slight preference for unvisited / different rooms (avoid back-and-forth)
-        if (nb != lastRoom)
-            w += 0.3;
-        else
-            w += 0.05;
-
-        weights.push_back(w);
-    }
-
-    // Weighted random selection
-    double totalWeight = 0;
-    for (double w : weights) totalWeight += w;
-
-    double r = (double)(std::rand() % 10000) / 10000.0 * totalWeight;
-    double cumulative = 0;
-    int chosen = candidates[0];
-    for (size_t i = 0; i < candidates.size(); i++) {
-        cumulative += weights[i];
-        if (r <= cumulative) {
-            chosen = candidates[i];
-            break;
-        }
-    }
-
-    // Update state
+    bool lureFavoredMove = false;
+    int chosen = chooseNextRoom(gs, *this, &lureFavoredMove);
     lastRoom = currentRoom;
     currentRoom = chosen;
 
@@ -100,20 +138,26 @@ void Enemy::move(const GameMap &map) {
         state = INVESTIGATING;
     else
         state = ROAMING;
+
+    return lureFavoredMove;
 }
 
+// Redirects the enemy toward a target room for a limited number of turns.
 void Enemy::applyLure(int targetRoom, int duration) {
     lureTarget = targetRoom;
     lureTimer = duration;
     state = INVESTIGATING;
 }
 
-void Enemy::tickLure() {
+// Advances the lure timer and clears it when the distraction expires.
+bool Enemy::tickLure() {
     if (lureTimer > 0) {
         lureTimer--;
         if (lureTimer == 0) {
             lureTarget = -1;
             state = ROAMING;
+            return true;
         }
     }
+    return false;
 }
