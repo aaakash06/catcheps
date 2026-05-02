@@ -166,7 +166,7 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.cameraPowerCost = 1;
         gs.deepScanPowerCost = 2;
         gs.lurePowerCost = 2;
-        gs.gateClosePowerCost = 1;
+        gs.gateClosePowerCost = 2;
         gs.gateUpkeepPowerCost = 1;
         gs.signalDecayTurns = 4;
         gs.audioProbDistance3 = 25;
@@ -198,13 +198,13 @@ void setDifficultyParams(GameState &gs, Difficulty diff) {
         gs.lureWeightMultiplier = 2.75;
     } else {
         gs.totalNights = 2;
-        gs.maxTurns = 25;
-        gs.cameraPowerCost = 2;
-        gs.deepScanPowerCost = 3;
-        gs.lurePowerCost = 4;
+        gs.maxTurns = 20;
+        gs.cameraPowerCost = 1;
+        gs.deepScanPowerCost = 5;
+        gs.lurePowerCost = 3;
         gs.gateClosePowerCost = 2;
         gs.gateUpkeepPowerCost = 1;
-        gs.signalDecayTurns = 2;
+        gs.signalDecayTurns = 3;
         gs.audioProbDistance3 = 10;
         gs.audioProbDistance2 = 25;
         gs.audioProbDistance1 = 45;
