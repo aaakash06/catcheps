@@ -74,7 +74,10 @@ static int readByteWithTimeout(int timeoutMs) {
 
 void initTerminal() {
     if (!termiosActive) {
-        tcgetattr(STDIN_FILENO, &origTermios);
+        if (tcgetattr(STDIN_FILENO, &origTermios) != 0) {
+            installInterruptHandlers();
+            return;
+        }
         termiosActive = true;
     }
     interruptSignal = 0;

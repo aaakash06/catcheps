@@ -234,7 +234,7 @@ This makes the enemy feel like it is stalking the player instead of wandering ai
 - weak audio support
 - almost no stale signal memory
 - strongly office-seeking enemy
-- 12 active-building Trident map: Skyline opens into West, Center, and East lanes, with `HC` as the main mid-map transfer hub
+- 12 active-building Trident map: Skyline opens into West, Center, and East lanes, with `HOC` as the main mid-map transfer hub
 - `MB` is reachable through three gate rooms: `KAD`, `LIB`, and `KNOW`
 
 ## Save / Load

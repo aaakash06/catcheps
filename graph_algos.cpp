@@ -24,6 +24,10 @@ static bool isBlockedOfficeEdge(int officeId, bool leftGateClosed, bool rightGat
     return false;
 }
 
+static bool isValidRoomId(const std::vector<Room> &rooms, int roomId) {
+    return roomId >= 0 && roomId < static_cast<int>(rooms.size());
+}
+
 // Computes a shortest path on the room graph while respecting blocked office edges.
 std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int dst,
                                  int officeId, bool leftGateClosed, bool rightGateClosed,
@@ -43,6 +47,8 @@ std::vector<int> bfsShortestPath(const std::vector<Room> &rooms, int src, int ds
         if (cur == dst) break;
 
         for (int nb : rooms[cur].neighbors) {
+            if (!isValidRoomId(rooms, nb))
+                continue;
             if (!visited[nb] &&
                 !isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
                                      centerGateClosed, cur, nb)) {
@@ -79,6 +85,8 @@ std::map<int, int> bfsDistances(const std::vector<Room> &rooms, int src,
         int cur = q.front();
         q.pop();
         for (int nb : rooms[cur].neighbors) {
+            if (!isValidRoomId(rooms, nb))
+                continue;
             if (!visited[nb] &&
                 !isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
                                      centerGateClosed, cur, nb)) {
@@ -102,6 +110,8 @@ static void apDfs(const std::vector<Room> &rooms, int u, int &timer,
     int children = 0;
 
     for (int v : rooms[u].neighbors) {
+        if (!isValidRoomId(rooms, v))
+            continue;
         if (isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
                                 centerGateClosed, u, v)) continue;
 
@@ -176,10 +186,13 @@ void diffuseProbability(const std::vector<Room> &rooms, std::map<int, double> &p
         if (probMap[i] <= 0.0) continue;
 
         std::vector<int> openNeighbors;
-        for (int nb : rooms[i].neighbors)
+        for (int nb : rooms[i].neighbors) {
+            if (!isValidRoomId(rooms, nb))
+                continue;
             if (!isBlockedOfficeEdge(officeId, leftGateClosed, rightGateClosed,
                                      centerGateClosed, (int)i, nb))
                 openNeighbors.push_back(nb);
+        }
 
         if (openNeighbors.empty()) {
             next[i] += probMap[i];
