@@ -12,6 +12,8 @@ static std::vector<int> getOpenNeighbors(const GameState &gs, int roomId) {
 
     const std::vector<int> &neighbors = gs.gameMap.rooms[roomId].neighbors;
     for (int nb : neighbors) {
+        if (nb < 0 || nb >= gs.gameMap.totalRooms)
+            continue;
         if (!isBlockedEdge(gs, roomId, nb))
             result.push_back(nb);
     }

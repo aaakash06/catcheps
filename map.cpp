@@ -12,7 +12,7 @@ GameMap buildMap(Difficulty diff) {
     GameMap gm;
 
     // All 13 HKU buildings (ordered so first N are used for each difficulty)
-    // 0:MB  1:KKL  2:LIB  3:KAD  4:KNOW  5:CYM  6:HC  7:HW  8:MW  9:RM  10:RHS  11:RR  12:JL
+    // 0:MB  1:KKL  2:LIB  3:KAD  4:KNOW  5:CYM  6:HOC  7:HW  8:MW  9:RM  10:RHT  11:RR  12:CYC
     struct Bldg { const char *abbrev; const char *name; bool isOffice; };
     Bldg allBuildings[] = {
         {"MB",   "Main Building",        true},
@@ -21,13 +21,13 @@ GameMap buildMap(Difficulty diff) {
         {"KAD",  "Kadoorie Building",    false},
         {"KNOW", "Knowles Building",     false},
         {"CYM",  "Chong Yuet Ming",      false},
-        {"HC",   "Haking Wong",          false},
-        {"HW",   "Haking Wong Eng",      false},
+        {"HOC",  "Hui Oi Chow",          false},
+        {"HW",   "Haking Wong",          false},
         {"MW",   "Meng Wah Complex",     false},
         {"RM",   "Runme Shaw",           false},
-        {"RHS",  "Rayson Hsu Shaw",      false},
+        {"RHT",  "Rayson H Theater",     false},
         {"RR",   "Run Run Shaw",         false},
-        {"JL",   "J Lee Building",       false},
+        {"CYC",  "Chow Yei Ching",       false},
     };
 
     int n;
@@ -58,39 +58,39 @@ GameMap buildMap(Difficulty diff) {
     if (diff == EASY) {
         addEdge(gm, 0, 3);  // MB -- KAD
         addEdge(gm, 0, 4);  // MB -- KNOW
-        addEdge(gm, 3, 6);  // KAD -- HC
-        addEdge(gm, 6, 5);  // HC -- CYM
-        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 3, 6);  // KAD -- HOC
+        addEdge(gm, 6, 5);  // HOC -- CYM
+        addEdge(gm, 6, 7);  // HOC -- HW
         addEdge(gm, 7, 5);  // HW -- CYM
         addEdge(gm, 2, 4);  // LIB -- KNOW
         addEdge(gm, 2, 1);  // LIB -- KKL
-        addEdge(gm, 2, 6);  // LIB -- HC
+        addEdge(gm, 2, 6);  // LIB -- HOC
     } else if (diff == NORMAL) {
         addEdge(gm, 0, 3);  // MB -- KAD
         addEdge(gm, 0, 4);  // MB -- KNOW
-        addEdge(gm, 3, 6);  // KAD -- HC
-        addEdge(gm, 6, 5);  // HC -- CYM
-        addEdge(gm, 6, 7);  // HC -- HW
+        addEdge(gm, 3, 6);  // KAD -- HOC
+        addEdge(gm, 6, 5);  // HOC -- CYM
+        addEdge(gm, 6, 7);  // HOC -- HW
         addEdge(gm, 7, 5);  // HW -- CYM
         addEdge(gm, 2, 4);  // LIB -- KNOW
         addEdge(gm, 2, 1);  // LIB -- KKL
-        addEdge(gm, 2, 6);  // LIB -- HC
+        addEdge(gm, 2, 6);  // LIB -- HOC
         addEdge(gm, 2, 9);  // LIB -- RM
         addEdge(gm, 7, 8);  // HW -- MW
         addEdge(gm, 5, 9);  // CYM -- RM
     } else {
-        addEdge(gm, 8, 10);  // MW -- RHS
-        addEdge(gm, 10, 12); // RHS -- JL
+        addEdge(gm, 8, 10);  // MW -- RHT
+        addEdge(gm, 10, 12); // RHT -- CYC
         addEdge(gm, 8, 7);   // MW -- HW
         addEdge(gm, 7, 3);   // HW -- KAD
-        addEdge(gm, 10, 5);  // RHS -- CYM
-        addEdge(gm, 5, 6);   // CYM -- HC
-        addEdge(gm, 6, 2);   // HC -- LIB
-        addEdge(gm, 12, 11); // JL -- RR
+        addEdge(gm, 10, 5);  // RHT -- CYM
+        addEdge(gm, 5, 6);   // CYM -- HOC
+        addEdge(gm, 6, 2);   // HOC -- LIB
+        addEdge(gm, 12, 11); // CYC -- RR
         addEdge(gm, 11, 9);  // RR -- RM
         addEdge(gm, 9, 4);   // RM -- KNOW
-        addEdge(gm, 6, 3);   // HC -- KAD
-        addEdge(gm, 6, 9);   // HC -- RM
+        addEdge(gm, 6, 3);   // HOC -- KAD
+        addEdge(gm, 6, 9);   // HOC -- RM
         addEdge(gm, 0, 3);   // MB -- KAD
         addEdge(gm, 0, 4);   // MB -- KNOW
         addEdge(gm, 0, 2);   // MB -- LIB
@@ -149,8 +149,8 @@ bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
     if (map.totalRooms == 8) {
         if (group == 0) return roomId == 1 || roomId == 2 || roomId == 4;      // KKL, LIB, KNOW
         if (group == 1) return roomId == 7 || roomId == 5 || roomId == 6 ||
-                               roomId == 3;                                     // HW, CYM, HC, KAD
-        if (group == 2) return roomId == 2 || roomId == 6;                       // LIB, HC
+                               roomId == 3;                                     // HW, CYM, HOC, KAD
+        if (group == 2) return roomId == 2 || roomId == 6;                       // LIB, HOC
         if (group == 3) return roomId == 4 || roomId == 3;                       // KNOW, KAD
         return false;
     }
@@ -159,20 +159,20 @@ bool roomInCameraGroup(const GameMap &map, int roomId, int group) {
     if (map.totalRooms == 10) {
         if (group == 0) return roomId == 8 || roomId == 9 || roomId == 5 ||
                                roomId == 7;                                 // MW, RM, CYM, HW
-        if (group == 1) return roomId == 5 || roomId == 2 || roomId == 6; // CYM, LIB, HC
+        if (group == 1) return roomId == 5 || roomId == 2 || roomId == 6; // CYM, LIB, HOC
         if (group == 2) return roomId == 9 || roomId == 1 || roomId == 2 ||
                                roomId == 4;                                 // RM, KKL, LIB, KNOW
-        if (group == 3) return roomId == 7 || roomId == 6 || roomId == 3; // HW, HC, KAD
+        if (group == 3) return roomId == 7 || roomId == 6 || roomId == 3; // HW, HOC, KAD
         return false;
     }
 
     // Overlapping strategic camera groups for HARD mode.
     if (map.totalRooms == 13) {
         if (group == 0) return roomId == 8 || roomId == 10 ||
-                               roomId == 12;                                  // MW, RHS, JL
+                               roomId == 12;                                  // MW, RHT, CYC
         if (group == 1) return roomId == 7 || roomId == 3;                   // HW, KAD
         if (group == 2) return roomId == 5 || roomId == 6 ||
-                               roomId == 2;                                   // CYM, HC, LIB
+                               roomId == 2;                                   // CYM, HOC, LIB
         if (group == 3) return roomId == 11 || roomId == 9 ||
                                roomId == 4;                                   // RR, RM, KNOW
         if (group == 4) return roomId == 3 || roomId == 4 ||

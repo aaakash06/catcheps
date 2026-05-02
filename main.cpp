@@ -2,14 +2,8 @@
 #include "ui.h"
 #include "terminal.h"
 #include "save_load.h"
-#include <iostream>
 #include <cstdlib>
 #include <ctime>
-#include <cstdio>
-#include <unistd.h>
-
-#define CLR_RESET   "\033[0m"
-#define CLR_CYAN    "\033[36m"
 
 static int keyToCameraGroupIndex(Key key) {
     if (key == KEY_1) return 0;
@@ -22,8 +16,8 @@ static int keyToCameraGroupIndex(Key key) {
 
 static void exitAfterInterrupt() {
     stopGameViewport();
+    shutdownCurses();
     restoreTerminal();
-    std::cout << "\nInterrupted. Terminal restored.\n";
     std::exit(130);
 }
 
@@ -116,77 +110,94 @@ static void runGameLoop(GameState &gs) {
         } else if (k == KEY_Q) {
             // Save & quit
             stopGameViewport();
-            restoreTerminal();
-            if (saveGame(gs, SAVE_FILE))
-                std::cout << "\n  Game saved! Returning to menu...\n";
-            else
-                std::cout << "\n  Failed to save game.\n";
-            pause("  Press Enter to continue...");
+            clearScreen();
+            if (saveGame(gs, SAVE_FILE)) {
+                printCentered(getCenterY(3), "Game saved.");
+                printCentered(getCenterY(3) + 1, "Returning to main menu...");
+            } else {
+                printCentered(getCenterY(2), "Failed to save game.");
+            }
+            pause("Press Enter to continue...");
             return;
         } else if (k == KEY_H || k == KEY_QUESTION) {
             // Help overlay
             stopGameViewport();
-            restoreTerminal();
             drawHelp();
-            initTerminal();
             startGameViewport();
         }
     }
 
     stopGameViewport();
-    restoreTerminal();
     drawEndGame(gs);
 }
 
 int main() {
     std::srand(static_cast<unsigned>(std::time(nullptr)));
 
+    initTerminal();
+    if (!initializeCurses()) {
+        restoreTerminal();
+        return 1;
+    }
+    if (!ensureStartupTerminalSize()) {
+        shutdownCurses();
+        restoreTerminal();
+        return 1;
+    }
+
+    showTitleScreen();
+    if (terminalInterruptRequested())
+        exitAfterInterrupt();
+    showStoryline();
+    if (terminalInterruptRequested())
+        exitAfterInterrupt();
+
     while (true) {
-        drawMainMenu();
+        MainMenuChoice choice = showMainMenu();
+        if (terminalInterruptRequested())
+            exitAfterInterrupt();
 
-        // Menu uses simple std::cin since terminal is in cooked mode
-        int choice = promptInt("  Select: ", 0, 3);
-        if (choice == -1) continue;
-
-        if (choice == 0) {
-            clearScreen();
-            printCentered(getCenterY(1), "Thanks for playing Camera Watch - HKU Campus!");
-            std::cout << "\n";
+        if (choice == MENU_QUIT) {
             break;
-        } else if (choice == 1) {
-            drawDifficultyMenu();
-            int diff = promptInt("  Select difficulty: ", 1, 3);
-            if (diff == -1) continue;
+        } else if (choice == MENU_START_GAME) {
+            Difficulty difficulty = NORMAL;
+            if (!showModeMenu(difficulty)) {
+                if (terminalInterruptRequested())
+                    exitAfterInterrupt();
+                continue;
+            }
 
             GameState gs;
-            gs.init(static_cast<Difficulty>(diff - 1));
+            gs.init(difficulty);
 
-            initTerminal();
             startGameViewport();
             runGameLoop(gs);
             stopGameViewport();
-            restoreTerminal();
-        } else if (choice == 2) {
+        } else if (choice == MENU_LOAD_GAME) {
             GameState gs;
+            clearScreen();
             if (loadGame(gs, SAVE_FILE)) {
-                std::cout << "  Game loaded!\n";
-                pause("  Press Enter to continue...");
-                initTerminal();
+                printCentered(getCenterY(2), "Game loaded.");
+                pause("Press Enter to continue...");
                 startGameViewport();
                 runGameLoop(gs);
                 stopGameViewport();
-                restoreTerminal();
             } else {
                 if (!gs.statusMessage.empty())
-                    std::cout << "  " << gs.statusMessage << "\n";
+                    printCentered(getCenterY(2), gs.statusMessage);
                 else
-                    std::cout << "  No save file found.\n";
-                pause("  Press Enter to continue...");
+                    printCentered(getCenterY(2), "No save file found.");
+                pause("Press Enter to return to main menu...");
             }
-        } else if (choice == 3) {
+        } else if (choice == MENU_HOW_TO_PLAY) {
             drawHelp();
         }
     }
 
+    clearScreen();
+    printCentered(getCenterY(1), "Thanks for playing Protocol 1911.");
+    pause("Press Enter to exit...");
+    shutdownCurses();
+    restoreTerminal();
     return 0;
 }

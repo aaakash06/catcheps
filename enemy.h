@@ -3,7 +3,6 @@
 
 #include <vector>
 #include <map>
->>>>>>> e6b27f4 (initial commit)
 #include <string>
 #include "map.h"
 

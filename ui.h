@@ -16,8 +16,24 @@ void printCentered(int y, const std::string &text);
 void drawCenteredArt(int startY, const std::string &art);
 
 // Start/stop the ncurses viewport used by the in-game HUD.
+bool initializeCurses();
+void shutdownCurses();
 void startGameViewport();
 void stopGameViewport();
+
+enum MainMenuChoice {
+    MENU_START_GAME,
+    MENU_LOAD_GAME,
+    MENU_HOW_TO_PLAY,
+    MENU_QUIT
+};
+
+// Ncurses startup flow.
+bool ensureStartupTerminalSize();
+void showTitleScreen();
+void showStoryline();
+MainMenuChoice showMainMenu();
+bool showModeMenu(Difficulty &difficulty);
 
 // Draw the full game HUD with spatial map.
 void drawGame(const GameState &gs, int cursorRoom);

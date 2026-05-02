@@ -422,12 +422,17 @@ void GameState::quickSweep(int group) {
     bool movementDetected = std::find(roomIds.begin(), roomIds.end(), enemy.currentRoom) != roomIds.end();
 
     lastScanOutput.push_back("QUICK SWEEP - " + label);
-    if (movementDetected)
+    if (movementDetected) {
         lastScanOutput.push_back(clusterContainsOfficeGate(gameMap, group)
             ? "Movement detected near the office gates."
             : "Movement detected in " + label + ".");
-    else
+        eventLog.push_back(clusterContainsOfficeGate(gameMap, group)
+            ? "Quick Sweep detected movement near the office gates."
+            : "Quick Sweep detected movement in " + label + ".");
+    } else {
         lastScanOutput.push_back("No movement detected in " + label + ".");
+        eventLog.push_back("Quick Sweep found no movement in " + label + ".");
+    }
 
     std::stringstream ss;
     ss << "Quick Sweep on " << label << " (-" << cameraPowerCost << "% energy)";

@@ -1,5 +1,7 @@
 #include "ui.h"
 #include <ncurses.h>
+static const int NCURSES_KEY_UP = KEY_UP;
+static const int NCURSES_KEY_DOWN = KEY_DOWN;
 #undef KEY_UP
 #undef KEY_DOWN
 #undef KEY_LEFT
@@ -15,6 +17,7 @@
 #include <sstream>
 #include <cstdlib>
 #include <cstdio>
+#include <utility>
 #include <vector>
 #include <sys/ioctl.h>
 
@@ -34,11 +37,26 @@
 
 static const int GAME_WIDTH = 85;
 static const int GAME_MAX_HEIGHT = 44;
+static const int GAME_MIN_HEIGHT = 30;
+static const int COMPACT_MIN_WIDTH = 58;
+static const int COMPACT_MIN_HEIGHT = 22;
+static const int COMPACT_MAX_WIDTH = 80;
+static const int COMPACT_MAX_HEIGHT = 24;
+static const int STARTUP_MIN_WIDTH = 58;
+static const int STARTUP_MIN_HEIGHT = 22;
 static int activeGameHeight = GAME_MAX_HEIGHT;
+static int requiredGameHeight = GAME_MIN_HEIGHT;
 static const int GAME_INNER_WIDTH = GAME_WIDTH - 2;
 
 static WINDOW *gameWin = nullptr;
+static bool cursesActive = false;
 static bool viewportActive = false;
+static int terminalRows = 24;
+static int terminalCols = 80;
+static int gameWinStartY = -1;
+static int gameWinStartX = -1;
+static int gameWinHeight = 0;
+static int gameWinWidth = 0;
 
 enum ViewportColor {
     VP_RED = 1,
@@ -50,24 +68,44 @@ enum ViewportColor {
     VP_WHITE
 };
 
+enum StartupColor {
+    BOOT_GREEN = 10,
+    BOOT_RED = 11,
+    BOOT_WHITE = 12
+};
+
+static bool readTerminalSizeFromIoctl(int &rows, int &cols) {
+    struct winsize ws;
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
+        rows = ws.ws_row;
+        cols = ws.ws_col;
+        return true;
+    }
+    return false;
+}
+
 static void syncTerminalSize() {
-    if (viewportActive && stdscr != nullptr) {
-        int rows = 0;
-        int cols = 0;
-        getmaxyx(stdscr, rows, cols);
-        LINES = rows;
-        COLS = cols;
+    int rows = 0;
+    int cols = 0;
+    if (readTerminalSizeFromIoctl(rows, cols)) {
+        if (cursesActive && (rows != terminalRows || cols != terminalCols))
+            resizeterm(rows, cols);
+        terminalRows = rows;
+        terminalCols = cols;
         return;
     }
 
-    struct winsize ws;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
-        COLS = ws.ws_col;
-        LINES = ws.ws_row;
-    } else {
-        COLS = 80;
-        LINES = 24;
+    if (cursesActive) {
+        getmaxyx(stdscr, rows, cols);
+        if (rows > 0 && cols > 0) {
+            terminalRows = rows;
+            terminalCols = cols;
+            return;
+        }
     }
+
+    terminalCols = 80;
+    terminalRows = 24;
 }
 
 static std::string trimLeft(const std::string &s) {
@@ -93,21 +131,33 @@ static int visibleLength(const std::string &s) {
     return len;
 }
 
+static void padLinesToSameVisibleWidth(std::vector<std::string> &lines) {
+    int width = 0;
+    for (const std::string &line : lines)
+        width = std::max(width, visibleLength(line));
+
+    for (std::string &line : lines) {
+        int pad = width - visibleLength(line);
+        if (pad > 0)
+            line.append(pad, ' ');
+    }
+}
+
 int getCenterY(int totalRows) {
     syncTerminalSize();
-    return std::max(0, (LINES - totalRows) / 2);
+    return std::max(0, (terminalRows - totalRows) / 2);
 }
 
 int getCenterX(int textLength) {
     syncTerminalSize();
-    return std::max(0, (COLS - textLength) / 2);
+    return std::max(0, (terminalCols - textLength) / 2);
 }
 
 void printAt(int y, int x, const std::string &text) {
     syncTerminalSize();
     y = std::max(0, y);
     x = std::max(0, x);
-    if (viewportActive && stdscr != nullptr) {
+    if (cursesActive) {
         mvprintw(y, x, "%s", text.c_str());
     } else {
         std::cout << "\033[" << (y + 1) << ";" << (x + 1) << "H" << text;
@@ -129,11 +179,21 @@ void drawCenteredArt(int startY, const std::string &art) {
 
 static void moveCursorToBottom() {
     syncTerminalSize();
-    if (!viewportActive)
-        std::cout << "\033[" << LINES << ";1H";
+    if (!cursesActive)
+        std::cout << "\033[" << terminalRows << ";1H";
 }
 
 static void waitForEnterInput() {
+    if (cursesActive) {
+        nodelay(stdscr, FALSE);
+        int ch;
+        do {
+            ch = getch();
+        } while (ch != '\n' && ch != '\r' && ch != 3 && !terminalInterruptRequested());
+        flushinp();
+        return;
+    }
+
     std::cin.clear();
     std::cin.get();
 }
@@ -145,31 +205,81 @@ static void drawTextBlock(int startY, int width, const std::vector<std::string> 
 }
 
 void clearScreen() {
-    std::cout << "\033[2J\033[1;1H";
+    if (cursesActive) {
+        clear();
+        refresh();
+    } else {
+        std::cout << "\033[2J\033[1;1H";
+    }
+}
+
+bool initializeCurses() {
+    if (cursesActive)
+        return true;
+    WINDOW *screen = initscr();
+    if (screen == nullptr)
+        return false;
+
+    cbreak();
+    noecho();
+    keypad(stdscr, TRUE);
+    curs_set(0);
+
+    if (has_colors()) {
+        start_color();
+        init_pair(VP_RED, COLOR_RED, COLOR_BLACK);
+        init_pair(VP_GREEN, COLOR_GREEN, COLOR_BLACK);
+        init_pair(VP_YELLOW, COLOR_YELLOW, COLOR_BLACK);
+        init_pair(VP_BLUE, COLOR_BLUE, COLOR_BLACK);
+        init_pair(VP_MAGENTA, COLOR_MAGENTA, COLOR_BLACK);
+        init_pair(VP_CYAN, COLOR_CYAN, COLOR_BLACK);
+        init_pair(VP_WHITE, COLOR_WHITE, COLOR_BLACK);
+        init_pair(BOOT_GREEN, COLOR_GREEN, COLOR_BLACK);
+        init_pair(BOOT_RED, COLOR_RED, COLOR_BLACK);
+        init_pair(BOOT_WHITE, COLOR_WHITE, COLOR_BLACK);
+        bkgd(COLOR_PAIR(BOOT_WHITE));
+    }
+
+    clear();
+    refresh();
+    cursesActive = true;
+    syncTerminalSize();
+    return true;
+}
+
+void shutdownCurses() {
+    if (gameWin != nullptr) {
+        delwin(gameWin);
+        gameWin = nullptr;
+    }
+    viewportActive = false;
+    gameWinStartY = -1;
+    gameWinStartX = -1;
+    gameWinHeight = 0;
+    gameWinWidth = 0;
+
+    if (cursesActive) {
+        clear();
+        refresh();
+        endwin();
+        cursesActive = false;
+    }
 }
 
 void startGameViewport() {
     if (viewportActive)
         return;
+    if (!cursesActive && !initializeCurses())
+        return;
 
-    initscr();
+    keypad(stdscr, FALSE);
+    nodelay(stdscr, FALSE);
     cbreak();
     noecho();
-    keypad(stdscr, FALSE);
     curs_set(0);
-
-    if (has_colors()) {
-        start_color();
-        use_default_colors();
-        init_pair(VP_RED, COLOR_RED, -1);
-        init_pair(VP_GREEN, COLOR_GREEN, -1);
-        init_pair(VP_YELLOW, COLOR_YELLOW, -1);
-        init_pair(VP_BLUE, COLOR_BLUE, -1);
-        init_pair(VP_MAGENTA, COLOR_MAGENTA, -1);
-        init_pair(VP_CYAN, COLOR_CYAN, -1);
-        init_pair(VP_WHITE, COLOR_WHITE, -1);
-    }
-
+    clear();
+    refresh();
+    flushinp();
     viewportActive = true;
 }
 
@@ -178,12 +288,367 @@ void stopGameViewport() {
         delwin(gameWin);
         gameWin = nullptr;
     }
+    gameWinStartY = -1;
+    gameWinStartX = -1;
+    gameWinHeight = 0;
+    gameWinWidth = 0;
     if (viewportActive) {
+        viewportActive = false;
+        keypad(stdscr, TRUE);
+        nodelay(stdscr, FALSE);
         clear();
         refresh();
-        endwin();
-        viewportActive = false;
+        flushinp();
     }
+}
+
+static void attrOnPair(int colorPair, int attrs = 0) {
+    attron((colorPair > 0 ? COLOR_PAIR(colorPair) : 0) | attrs);
+}
+
+static void attrOffPair(int colorPair, int attrs = 0) {
+    attroff((colorPair > 0 ? COLOR_PAIR(colorPair) : 0) | attrs);
+}
+
+static void mvaddCenteredCurses(int y, const std::string &text, int colorPair, int attrs = 0) {
+    syncTerminalSize();
+    int x = std::max(0, (terminalCols - static_cast<int>(text.size())) / 2);
+    attrOnPair(colorPair, attrs);
+    mvaddnstr(y, x, text.c_str(), std::max(0, terminalCols - x));
+    attrOffPair(colorPair, attrs);
+}
+
+static void mvaddTextCurses(int y, int x, const std::string &text, int colorPair, int attrs = 0) {
+    if (y < 0 || y >= terminalRows || x >= terminalCols)
+        return;
+    x = std::max(0, x);
+    attrOnPair(colorPair, attrs);
+    mvaddnstr(y, x, text.c_str(), std::max(0, terminalCols - x));
+    attrOffPair(colorPair, attrs);
+}
+
+static std::vector<std::string> wrapText(const std::string &text, int width) {
+    std::vector<std::string> lines;
+    if (text.empty()) {
+        lines.push_back("");
+        return lines;
+    }
+
+    std::istringstream words(text);
+    std::string word;
+    std::string line;
+    while (words >> word) {
+        if (!line.empty() && static_cast<int>(line.size() + 1 + word.size()) > width) {
+            lines.push_back(line);
+            line.clear();
+        }
+        if (!line.empty())
+            line += " ";
+        line += word;
+    }
+    if (!line.empty())
+        lines.push_back(line);
+    return lines;
+}
+
+bool ensureStartupTerminalSize() {
+    if (!cursesActive && !initializeCurses())
+        return false;
+
+    int maxY = 0;
+    int maxX = 0;
+    getmaxyx(stdscr, maxY, maxX);
+    terminalRows = maxY;
+    terminalCols = maxX;
+
+    if (maxY >= STARTUP_MIN_HEIGHT && maxX >= STARTUP_MIN_WIDTH)
+        return true;
+
+    clear();
+    mvaddCenteredCurses(std::max(0, maxY / 2 - 2), "Terminal too small for PROTOCOL 1911.", BOOT_RED, A_BOLD);
+    mvaddCenteredCurses(std::max(0, maxY / 2), "Minimum size: 58 x 22", BOOT_WHITE);
+    mvaddCenteredCurses(std::max(0, maxY / 2 + 1),
+                        "Current size: " + std::to_string(maxX) + " x " + std::to_string(maxY),
+                        BOOT_WHITE);
+    mvaddCenteredCurses(std::max(0, maxY / 2 + 3), "Press any key to exit...", BOOT_GREEN);
+    refresh();
+    nodelay(stdscr, FALSE);
+    getch();
+    flushinp();
+    return false;
+}
+
+void showTitleScreen() {
+    clear();
+    refresh();
+    syncTerminalSize();
+
+    const std::vector<std::pair<std::string, int> > diagnostics = {
+        {"MEM CHECK................ OK", BOOT_GREEN},
+        {"MOUNTING /dev/sda1....... FAILED", BOOT_RED},
+        {"ROUTING SECURITY CAMERAS. DEGRADED", BOOT_RED},
+        {"BACKUP BATTERY........... ONLINE", BOOT_GREEN}
+    };
+
+    int y = std::max(1, terminalRows / 2 - 3);
+    for (size_t i = 0; i < diagnostics.size(); i++) {
+        mvaddCenteredCurses(y + static_cast<int>(i), diagnostics[i].first, diagnostics[i].second, A_BOLD);
+        refresh();
+        napms(260);
+    }
+    napms(650);
+    flushinp();
+
+    clear();
+    const std::vector<std::string> logo = {
+        " ______  ______   ______  _______  ______  ______  ______  __       ",
+        "|   __ \\|   __ \\ |   __ \\|_     _||   __ \\|      ||   __ \\|  |      ",
+        "|    __/|      < |  |  | | |   |  |  |  | |   ---||  |  | |  |      ",
+        "|___|   |___|__| |______/  |___|  |______/|______||______/|__|      ",
+        "                                                                    ",
+        "                         P R O T O C O L                           ",
+        "                              1 9 1 1                               "
+    };
+    int logoStart = std::max(1, (terminalRows - static_cast<int>(logo.size())) / 2 - 1);
+    for (size_t i = 0; i < logo.size(); i++)
+        mvaddCenteredCurses(logoStart + static_cast<int>(i), logo[i], BOOT_GREEN, A_BOLD);
+    mvaddCenteredCurses(terminalRows - 3,
+                        "[ SYSTEM BOOT SEQUENCE INITIATED ] - Press [ENTER] to boot...",
+                        BOOT_WHITE, A_BOLD);
+    refresh();
+
+    nodelay(stdscr, FALSE);
+    int ch;
+    do {
+        ch = getch();
+    } while (ch != '\n' && ch != '\r' && ch != 3 && !terminalInterruptRequested());
+    flushinp();
+}
+
+static bool slowPrintLine(int y, int x, const std::string &text, int colorPair, int delayMs) {
+    nodelay(stdscr, TRUE);
+    for (size_t i = 0; i < text.size(); i++) {
+        int ch = getch();
+        if (ch == ' ' || ch == '\n' || ch == '\r') {
+            nodelay(stdscr, FALSE);
+            return true;
+        }
+        if (ch == 3 || terminalInterruptRequested()) {
+            nodelay(stdscr, FALSE);
+            return true;
+        }
+
+        int attrs = 0;
+        bool glitch = (colorPair == BOOT_RED && (std::rand() % 26) == 0);
+        if (glitch)
+            attrs |= A_REVERSE;
+        attrOnPair(colorPair, attrs);
+        mvaddch(y, x + static_cast<int>(i), text[i]);
+        attrOffPair(colorPair, attrs);
+        refresh();
+        if (glitch) {
+            napms(24);
+            attrOnPair(colorPair);
+            mvaddch(y, x + static_cast<int>(i), text[i]);
+            attrOffPair(colorPair);
+            refresh();
+        }
+        napms(delayMs);
+    }
+    nodelay(stdscr, FALSE);
+    return false;
+}
+
+static void slowPrintWrapped(int &y, const std::string &text, int colorPair, bool &skipAll) {
+    int maxWidth = std::max(20, terminalCols - 8);
+    std::vector<std::string> lines = wrapText(text, maxWidth);
+    for (size_t i = 0; i < lines.size(); i++) {
+        const std::string &line = lines[i];
+        if (y >= terminalRows - 3) {
+            scrl(1);
+            y = terminalRows - 4;
+            refresh();
+        }
+        int x = std::max(0, (terminalCols - static_cast<int>(line.size())) / 2);
+        if (skipAll) {
+            mvaddTextCurses(y, x, line, colorPair);
+        } else if (slowPrintLine(y, x, line, colorPair, 18)) {
+            skipAll = true;
+            mvaddTextCurses(y, x, line, colorPair);
+        }
+        y++;
+    }
+}
+
+void showStoryline() {
+    clear();
+    refresh();
+    syncTerminalSize();
+    scrollok(stdscr, TRUE);
+
+    bool skipAll = false;
+    int y = 1;
+    const std::vector<std::string> greenLines = {
+        "HKU MAINFRAME [Version 4.2.1]",
+        "LOGIN SUCCESSFUL.",
+        "USER: STUDENT_ADMIN",
+        "LOCATION: MAIN BUILDING (MB) - SUB-LEVEL 2"
+    };
+    const std::vector<std::string> redLines = {
+        "WARNING: CAMPUS WIDE POWER FAILURE DETECTED.",
+        "WARNING: MULTIPLE UNAUTHORIZED INTRUDERS DETECTED ON CAMPUS.",
+        "THREAT BEHAVIOR: HOSTILE."
+    };
+    const std::vector<std::string> whiteLines = {
+        "You are trapped in the Main Building (MB) Server Room.",
+        "Dangerous intruders have breached the campus perimeter.",
+        "They are hunting for you, moving room-by-room across the campus.",
+        "Main power is dead. You are surviving on a backup battery.",
+        "You must use this terminal to track the intruders using security cameras.",
+        "You can close blast doors to block their path, but keeping them closed drains your battery fast.",
+        "You may use Audio Lures to trick the intruders into another hallway.",
+        "Do not let your battery hit 0%.",
+        "Do not let the intruders reach the Main Building.",
+        "Survive until dawn."
+    };
+
+    for (size_t i = 0; i < greenLines.size(); i++)
+        slowPrintWrapped(y, greenLines[i], BOOT_GREEN, skipAll);
+    y++;
+    for (size_t i = 0; i < redLines.size(); i++)
+        slowPrintWrapped(y, redLines[i], BOOT_RED, skipAll);
+    y++;
+    for (size_t i = 0; i < whiteLines.size(); i++)
+        slowPrintWrapped(y, whiteLines[i], BOOT_WHITE, skipAll);
+
+    mvaddCenteredCurses(terminalRows - 2, "PRESS [ENTER] TO ACCESS MAIN MENU...", BOOT_GREEN, A_BOLD);
+    refresh();
+    nodelay(stdscr, FALSE);
+    int ch;
+    do {
+        ch = getch();
+    } while (ch != '\n' && ch != '\r' && ch != 3 && !terminalInterruptRequested());
+    scrollok(stdscr, FALSE);
+    flushinp();
+}
+
+MainMenuChoice showMainMenu() {
+    keypad(stdscr, TRUE);
+    nodelay(stdscr, FALSE);
+    flushinp();
+
+    const std::vector<std::string> options = {
+        "Start Game",
+        "Load Game",
+        "How to Play",
+        "Quit"
+    };
+    int selected = 0;
+
+    while (!terminalInterruptRequested()) {
+        clear();
+        syncTerminalSize();
+        mvaddCenteredCurses(2, "P R O T O C O L  1 9 1 1", BOOT_RED, A_BOLD);
+        mvaddCenteredCurses(4, "HKU MAINFRAME ACCESS TERMINAL", BOOT_GREEN);
+
+        int startY = std::max(7, terminalRows / 2 - 2);
+        for (size_t i = 0; i < options.size(); i++) {
+            int attrs = (static_cast<int>(i) == selected) ? A_REVERSE | A_BOLD : A_NORMAL;
+            mvaddCenteredCurses(startY + static_cast<int>(i) * 2, options[i], BOOT_WHITE, attrs);
+        }
+        refresh();
+
+        int ch = getch();
+        if (ch == 3 || terminalInterruptRequested())
+            return MENU_QUIT;
+        if (ch == NCURSES_KEY_UP || ch == 'w' || ch == 'W') {
+            selected = (selected + static_cast<int>(options.size()) - 1) % static_cast<int>(options.size());
+        } else if (ch == NCURSES_KEY_DOWN || ch == 's' || ch == 'S') {
+            selected = (selected + 1) % static_cast<int>(options.size());
+        } else if (ch >= '1' && ch <= '4') {
+            selected = ch - '1';
+            flushinp();
+            clear();
+            refresh();
+            return static_cast<MainMenuChoice>(selected);
+        } else if (ch == '0' || ch == 27) {
+            flushinp();
+            clear();
+            refresh();
+            return MENU_QUIT;
+        } else if (ch == '\n' || ch == '\r') {
+            flushinp();
+            clear();
+            refresh();
+            return static_cast<MainMenuChoice>(selected);
+        }
+    }
+
+    return MENU_QUIT;
+}
+
+bool showModeMenu(Difficulty &difficulty) {
+    keypad(stdscr, TRUE);
+    nodelay(stdscr, FALSE);
+    flushinp();
+
+    const std::vector<std::string> options = {
+        "Easy Mode",
+        "Normal Mode",
+        "Hard Mode",
+        "Back"
+    };
+    int selected = 1;
+
+    while (!terminalInterruptRequested()) {
+        clear();
+        syncTerminalSize();
+        mvaddCenteredCurses(2, "SELECT PLAY MODE", BOOT_RED, A_BOLD);
+        mvaddCenteredCurses(4, "Choose the campus layout and pressure level.", BOOT_GREEN);
+
+        int startY = std::max(7, terminalRows / 2 - 3);
+        for (size_t i = 0; i < options.size(); i++) {
+            int attrs = (static_cast<int>(i) == selected) ? A_REVERSE | A_BOLD : A_NORMAL;
+            mvaddCenteredCurses(startY + static_cast<int>(i) * 2, options[i], BOOT_WHITE, attrs);
+        }
+        refresh();
+
+        int ch = getch();
+        if (ch == 3 || terminalInterruptRequested())
+            return false;
+        if (ch == NCURSES_KEY_UP || ch == 'w' || ch == 'W') {
+            selected = (selected + static_cast<int>(options.size()) - 1) % static_cast<int>(options.size());
+        } else if (ch == NCURSES_KEY_DOWN || ch == 's' || ch == 'S') {
+            selected = (selected + 1) % static_cast<int>(options.size());
+        } else if (ch >= '1' && ch <= '3') {
+            selected = ch - '1';
+            flushinp();
+            clear();
+            refresh();
+            difficulty = static_cast<Difficulty>(selected);
+            return true;
+        } else if (ch == '4' || ch == '0') {
+            flushinp();
+            clear();
+            refresh();
+            return false;
+        } else if (ch == '\n' || ch == '\r') {
+            flushinp();
+            clear();
+            refresh();
+            if (selected == 3)
+                return false;
+            difficulty = static_cast<Difficulty>(selected);
+            return true;
+        } else if (ch == 27 || ch == 'q' || ch == 'Q') {
+            flushinp();
+            clear();
+            refresh();
+            return false;
+        }
+    }
+
+    return false;
 }
 
 static std::string powerBar(int power, int maxPower) {
@@ -249,8 +714,9 @@ static void applyAnsiCode(WINDOW *win, int code, int &attrs, int &colorPair) {
     wattrset(win, attrs | (colorPair > 0 ? COLOR_PAIR(colorPair) : 0));
 }
 
-static void printWindowAnsi(WINDOW *win, int y, int x, const std::string &text, int maxWidth = GAME_INNER_WIDTH) {
-    if (win == nullptr || y <= 0 || y >= activeGameHeight - 1 || x <= 0 || x >= GAME_WIDTH - 1)
+static void printWindowAnsiInBox(WINDOW *win, int boxHeight, int boxWidth,
+                                 int y, int x, const std::string &text, int maxWidth) {
+    if (win == nullptr || y <= 0 || y >= boxHeight - 1 || x <= 0 || x >= boxWidth - 1)
         return;
 
     int attrs = 0;
@@ -259,7 +725,7 @@ static void printWindowAnsi(WINDOW *win, int y, int x, const std::string &text, 
     int printed = 0;
     wattrset(win, A_NORMAL);
 
-    for (size_t i = 0; i < text.size() && printed < maxWidth && col < GAME_WIDTH - 1; i++) {
+    for (size_t i = 0; i < text.size() && printed < maxWidth && col < boxWidth - 1; i++) {
         if (text[i] == '\033' && i + 1 < text.size() && text[i + 1] == '[') {
             size_t end = text.find('m', i + 2);
             if (end != std::string::npos) {
@@ -282,8 +748,26 @@ static void printWindowAnsi(WINDOW *win, int y, int x, const std::string &text, 
     wattrset(win, A_NORMAL);
 }
 
+static void printWindowAnsi(WINDOW *win, int y, int x, const std::string &text, int maxWidth = GAME_INNER_WIDTH) {
+    printWindowAnsiInBox(win, activeGameHeight, GAME_WIDTH, y, x, text, maxWidth);
+}
+
 static void printWindowCentered(WINDOW *win, int y, const std::string &text) {
     printWindowAnsi(win, y, centeredXForLine(text), text);
+}
+
+static void printWindowCenteredInBox(WINDOW *win, int boxHeight, int boxWidth,
+                                     int y, const std::string &text) {
+    int innerWidth = std::max(1, boxWidth - 2);
+    int x = 1 + std::max(0, (innerWidth - visibleLength(text)) / 2);
+    printWindowAnsiInBox(win, boxHeight, boxWidth, y, x, text, innerWidth);
+}
+
+static void printWindowDividerInBox(WINDOW *win, int boxHeight, int boxWidth, int y, char ch = '=') {
+    if (win == nullptr || y <= 0 || y >= boxHeight - 1)
+        return;
+    std::string divider(std::max(1, boxWidth - 2), ch);
+    mvwprintw(win, y, 1, "%s", divider.c_str());
 }
 
 static void printWindowDivider(WINDOW *win, int y, char ch = '=') {
@@ -293,17 +777,61 @@ static void printWindowDivider(WINDOW *win, int y, char ch = '=') {
     mvwprintw(win, y, 1, "%s", divider.c_str());
 }
 
+static bool ensureGameWindow(int height, int width, int startY, int startX) {
+    const bool geometryChanged =
+        gameWin == nullptr ||
+        gameWinHeight != height ||
+        gameWinWidth != width ||
+        gameWinStartY != startY ||
+        gameWinStartX != startX;
+
+    if (geometryChanged) {
+        erase();
+        if (gameWin != nullptr)
+            delwin(gameWin);
+        gameWin = newwin(height, width, startY, startX);
+        if (gameWin == nullptr) {
+            gameWinStartY = -1;
+            gameWinStartX = -1;
+            gameWinHeight = 0;
+            gameWinWidth = 0;
+            return false;
+        }
+        leaveok(gameWin, TRUE);
+        gameWinStartY = startY;
+        gameWinStartX = startX;
+        gameWinHeight = height;
+        gameWinWidth = width;
+    }
+
+    return gameWin != nullptr;
+}
+
 static bool terminalTooSmallForGameViewport() {
-    return LINES < activeGameHeight || COLS < GAME_WIDTH;
+    return terminalRows < activeGameHeight || terminalCols < GAME_WIDTH;
+}
+
+static bool terminalCanUseCompactViewport() {
+    return terminalRows >= COMPACT_MIN_HEIGHT && terminalCols >= COMPACT_MIN_WIDTH;
 }
 
 static void drawViewportTooSmallMessage() {
     clear();
-    std::string line1 = "Terminal too small. Please resize.";
-    std::string line2 = "Minimum recommended size: 85 x " + std::to_string(activeGameHeight);
-    int startY = getCenterY(3);
-    printCentered(startY, line1);
-    printCentered(startY + 2, line2);
+    syncTerminalSize();
+    std::vector<std::string> lines = {
+        "Terminal too small.",
+        "Need at least " + std::to_string(GAME_WIDTH) + " x " +
+            std::to_string(requiredGameHeight) + " for the full HUD.",
+        "Current size: " + std::to_string(terminalCols) + " x " + std::to_string(terminalRows)
+    };
+    int startY = std::max(0, (terminalRows - static_cast<int>(lines.size())) / 2);
+    for (size_t i = 0; i < lines.size(); i++) {
+        std::string line = lines[i];
+        if (terminalCols > 0 && static_cast<int>(line.size()) > terminalCols)
+            line = line.substr(0, terminalCols);
+        int x = std::max(0, (terminalCols - static_cast<int>(line.size())) / 2);
+        mvprintw(startY + static_cast<int>(i), x, "%s", line.c_str());
+    }
     refresh();
 }
 
@@ -316,7 +844,7 @@ static std::vector<MapPos> getFallbackLayout(int totalRooms) {
             {7, 14, 0},  // HW
             {5, 32, 0},  // CYM
             {3,  0, 2},  // KAD
-            {6, 16, 2},  // HC
+            {6, 16, 2},  // HOC
             {0,  0, 4},  // MB
             {2, 16, 4},  // LIB
             {1, 32, 4},  // KKL
@@ -331,7 +859,7 @@ static std::vector<MapPos> getFallbackLayout(int totalRooms) {
             {5, 30, 2},  // CYM
             {9, 48, 2},  // RM
             {3,  0, 4},  // KAD
-            {6, 16, 4},  // HC
+            {6, 16, 4},  // HOC
             {2, 30, 4},  // LIB
             {1, 46, 4},  // KKL
             {0,  0, 6},  // MB
@@ -341,13 +869,13 @@ static std::vector<MapPos> getFallbackLayout(int totalRooms) {
 
     return {
         {8,   7,  2},  // MW
-        {10, 32,  2},  // RHS
-        {12, 57,  2},  // JL
+        {10, 32,  2},  // RHT
+        {12, 57,  2},  // CYC
         {7,   7,  7},  // HW
         {5,  32,  7},  // CYM
         {11, 57,  7},  // RR
         {3,   7, 12},  // KAD
-        {6,  32, 12},  // HC
+        {6,  32, 12},  // HOC
         {9,  57, 12},  // RM
         {2,  32, 16},  // LIB
         {4,  57, 16},  // KNOW
@@ -559,6 +1087,259 @@ static std::vector<std::string> commandCostLines(const GameState &gs) {
     return lines;
 }
 
+static std::vector<std::string> wrapPlainText(const std::string &text, int width) {
+    std::vector<std::string> lines;
+    if (width <= 0) {
+        lines.push_back("");
+        return lines;
+    }
+
+    std::stringstream words(text);
+    std::string word;
+    std::string line;
+    while (words >> word) {
+        if (line.empty()) {
+            line = word;
+        } else if (static_cast<int>(line.size() + 1 + word.size()) <= width) {
+            line += " " + word;
+        } else {
+            lines.push_back(line);
+            line = word;
+        }
+
+        while (static_cast<int>(line.size()) > width) {
+            lines.push_back(line.substr(0, width));
+            line = line.substr(width);
+        }
+    }
+
+    if (!line.empty())
+        lines.push_back(line);
+    if (lines.empty())
+        lines.push_back("");
+    return lines;
+}
+
+static std::vector<std::string> eventLogDisplayLines(const std::vector<std::string> &events,
+                                                     int maxEvents, int maxRows, int width) {
+    std::vector<std::vector<std::string>> wrappedEvents;
+    int totalRows = 0;
+
+    for (int i = static_cast<int>(events.size()) - 1;
+         i >= 0 && static_cast<int>(wrappedEvents.size()) < maxEvents; i--) {
+        std::vector<std::string> wrapped = wrapPlainText(events[i], std::max(1, width - 2));
+        if (totalRows + static_cast<int>(wrapped.size()) > maxRows && !wrappedEvents.empty())
+            break;
+
+        if (totalRows + static_cast<int>(wrapped.size()) > maxRows)
+            wrapped.resize(maxRows - totalRows);
+
+        totalRows += static_cast<int>(wrapped.size());
+        wrappedEvents.push_back(wrapped);
+        if (totalRows >= maxRows)
+            break;
+    }
+
+    std::vector<std::string> lines;
+    for (auto it = wrappedEvents.rbegin(); it != wrappedEvents.rend(); ++it) {
+        for (size_t i = 0; i < it->size(); i++)
+            lines.push_back((i == 0 ? "> " : "  ") + (*it)[i]);
+    }
+    return lines;
+}
+
+static std::vector<std::string> scanOutputDisplayLines(const GameState &gs, int maxRows, int width) {
+    std::vector<std::string> lines;
+    if (maxRows <= 0 || width <= 0 || gs.lastScanOutput.empty())
+        return lines;
+
+    for (const std::string &entry : gs.lastScanOutput) {
+        std::vector<std::string> wrapped = wrapPlainText(entry, width);
+        for (const std::string &line : wrapped) {
+            if (static_cast<int>(lines.size()) >= maxRows)
+                return lines;
+            lines.push_back(line);
+        }
+    }
+    return lines;
+}
+
+static std::string compactRoomToken(const GameState &gs, int roomId, int cursorRoom) {
+    if (roomId < 0 || roomId >= gs.gameMap.totalRooms)
+        return "";
+
+    const Room &room = gs.gameMap.rooms[roomId];
+    return renderRoom(gs, room, room.id == cursorRoom, 4);
+}
+
+static std::string compactGateToken(const GameState &gs, int roomId) {
+    if (roomId == 3)
+        return renderGateMarker(gs.rightGateClosed);
+    if (roomId == 2 && roomConnectsToOffice(gs, 2))
+        return renderGateMarker(gs.centerGateClosed);
+    if (roomId == 4)
+        return renderGateMarker(gs.leftGateClosed);
+    return std::string(CLR_DIM) + "----" + CLR_RESET;
+}
+
+static std::vector<std::string> compactMapLines(const GameState &gs, int cursorRoom) {
+    auto r = [&](int id) { return compactRoomToken(gs, id, cursorRoom); };
+    auto g = [&](int id) { return compactGateToken(gs, id); };
+    std::vector<std::string> lines;
+
+    if (gs.gameMap.totalRooms <= 8) {
+        lines.push_back("      " + r(1) + "        " + r(7) + "====" + r(5));
+        lines.push_back(std::string(CLR_DIM) + "        |             \\      /" + CLR_RESET);
+        lines.push_back("      " + r(2) + "===========" + r(6));
+        lines.push_back(std::string(CLR_DIM) + "        |               |" + CLR_RESET);
+        lines.push_back("      " + r(4) + "--" + g(4) + "--" + r(0) + "--" + g(3) + "--" + r(3));
+        padLinesToSameVisibleWidth(lines);
+        return lines;
+    }
+
+    if (gs.gameMap.totalRooms <= 10) {
+        lines.push_back("                     " + r(8));
+        lines.push_back(std::string(CLR_DIM) + "                       |" + CLR_RESET);
+        lines.push_back("      " + r(1) + "--" + r(2) + "--" + r(9) + "--" + r(5) + "--" + r(7));
+        lines.push_back(std::string(CLR_DIM) + "        |              \\      /       |" + CLR_RESET);
+        lines.push_back("      " + r(4) + "--" + g(4) + "--" + r(0) + "--" + g(3) + "--" + r(3) + "--" + r(6));
+        padLinesToSameVisibleWidth(lines);
+        return lines;
+    }
+
+    lines.push_back("      " + r(8) + "-----" + r(10) + "-----" + r(12));
+    lines.push_back(std::string(CLR_DIM) + "        |         |         |" + CLR_RESET);
+    lines.push_back("      " + r(7) + "     " + r(5) + "     " + r(11));
+    lines.push_back(std::string(CLR_DIM) + "        |         |         |" + CLR_RESET);
+    lines.push_back("      " + r(3) + "-----" + r(6) + "-----" + r(9));
+    lines.push_back(std::string(CLR_DIM) + "        |         |         |" + CLR_RESET);
+    lines.push_back(std::string(CLR_DIM) + "        |" + CLR_RESET + "        " + r(2) + "     " + r(4));
+    lines.push_back("       " + g(3) + "       " + g(2) + "       " + g(4));
+    lines.push_back(std::string(CLR_DIM) + "        \\         |         /" + CLR_RESET);
+    lines.push_back("                 " + r(0));
+    padLinesToSameVisibleWidth(lines);
+    return lines;
+}
+
+static std::string gateSummaryLine(const GameState &gs) {
+    std::stringstream ss;
+    ss << "Gates KAD:" << (gs.rightGateClosed ? CLR_RED "Closed" : CLR_GREEN "Open");
+    if (roomConnectsToOffice(gs, 2))
+        ss << CLR_RESET << " LIB:" << (gs.centerGateClosed ? CLR_RED "Closed" : CLR_GREEN "Open");
+    ss << CLR_RESET << " KNOW:" << (gs.leftGateClosed ? CLR_RED "Closed" : CLR_GREEN "Open") << CLR_RESET;
+    return ss.str();
+}
+
+static void drawCompactGameInternal(const GameState &gs, int cursorRoom, bool selectingSweep, int selectedGroup) {
+    int compactHeight = std::min(COMPACT_MAX_HEIGHT, terminalRows);
+    int compactWidth = std::min(COMPACT_MAX_WIDTH, terminalCols);
+    compactHeight = std::max(COMPACT_MIN_HEIGHT, compactHeight);
+    compactWidth = std::max(COMPACT_MIN_WIDTH, compactWidth);
+    activeGameHeight = compactHeight;
+
+    int startY = std::max(0, (terminalRows - compactHeight) / 2);
+    int startX = std::max(0, (terminalCols - compactWidth) / 2);
+    if (!ensureGameWindow(compactHeight, compactWidth, startY, startX)) {
+        drawViewportTooSmallMessage();
+        return;
+    }
+
+    werase(gameWin);
+    box(gameWin, 0, 0);
+
+    const int innerWidth = compactWidth - 2;
+    int y = 1;
+    std::stringstream header;
+    header << CLR_BOLD << "CAMERA WATCH"
+           << CLR_RESET << "  Night " << gs.currentNight << "/" << gs.totalNights
+           << "  Turn " << gs.turn << "/" << gs.maxTurns;
+    printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, header.str());
+
+    std::stringstream energy;
+    energy << "Energy " << (gs.maxPower > 0 ? (gs.power * 100 / gs.maxPower) : 0)
+           << "% " << powerBar(gs.power, gs.maxPower);
+    printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, energy.str());
+    printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, gateSummaryLine(gs));
+
+    std::stringstream lure;
+    lure << "Lure: " << lureStatusText(gs)
+         << " | Next: " << lureCooldownText(gs)
+         << " | Signal: " << getSignalDisplay(gs);
+    printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, lure.str());
+    printWindowDividerInBox(gameWin, compactHeight, compactWidth, y++, '-');
+
+    int commandRows = selectingSweep ? 5 : 4;
+    int commandTop = compactHeight - commandRows;
+    std::vector<std::string> mapLines = compactMapLines(gs, cursorRoom);
+    for (const std::string &line : mapLines) {
+        if (y >= commandTop - 4)
+            break;
+        printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, line);
+    }
+
+    if (cursorRoom >= 0 && cursorRoom < gs.gameMap.totalRooms && y < commandTop - 3) {
+        const Room &curRoom = gs.gameMap.rooms[cursorRoom];
+        printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++,
+                                 std::string("Cursor: ") + CLR_CYAN + curRoom.abbrev + CLR_RESET +
+                                 " - " + curRoom.name);
+    }
+
+    if (y < commandTop - 2) {
+        std::vector<std::string> scanLines = scanOutputDisplayLines(gs, 1, innerWidth - 4);
+        if (!scanLines.empty()) {
+            printWindowAnsiInBox(gameWin, compactHeight, compactWidth, y++, 2,
+                                 std::string("> ") + CLR_CYAN + scanLines.front() + CLR_RESET,
+                                 innerWidth);
+        } else if (!gs.eventLog.empty()) {
+            std::vector<std::string> logLines = eventLogDisplayLines(gs.eventLog, 1, 1, innerWidth - 2);
+            if (!logLines.empty())
+                printWindowAnsiInBox(gameWin, compactHeight, compactWidth, y++, 2,
+                                     std::string(CLR_DIM) + logLines.front() + CLR_RESET,
+                                     innerWidth);
+        }
+    }
+
+    std::vector<std::string> costs = commandCostLines(gs);
+    for (const std::string &line : costs) {
+        if (y >= commandTop)
+            break;
+        printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++,
+                                 std::string(CLR_DIM) + line + CLR_RESET);
+    }
+
+    printWindowDividerInBox(gameWin, compactHeight, compactWidth, commandTop, '=');
+    if (selectingSweep) {
+        int groupCount = effectiveCameraGroupCount(gs.gameMap);
+        if (groupCount > 0) {
+            selectedGroup = std::max(0, std::min(selectedGroup, groupCount - 1));
+            printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 1,
+                                     sweepOptionLine(gs, selectedGroup));
+            printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 2,
+                                     cameraGroupRoomsText(gs, selectedGroup, cursorRoom));
+            printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 3,
+                                     std::string(CLR_CYAN) + "Enter" + CLR_RESET + " Confirm  " +
+                                     CLR_CYAN + "0/Esc" + CLR_RESET + " Cancel  Arrows/1-5");
+        } else {
+            printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 2,
+                                     std::string(CLR_RED) + "No camera clusters available." + CLR_RESET);
+        }
+    } else {
+        printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 1,
+                                 std::string(CLR_CYAN) + "A" + CLR_RESET + " Sweep  " +
+                                 CLR_CYAN + "Enter" + CLR_RESET + " Scan  " +
+                                 CLR_CYAN + "G" + CLR_RESET + " Gate  " +
+                                 CLR_CYAN + "L" + CLR_RESET + " Lure");
+        printWindowCenteredInBox(gameWin, compactHeight, compactWidth, commandTop + 2,
+                                 std::string(CLR_CYAN) + "W" + CLR_RESET + " Wait  " +
+                                 CLR_CYAN + "Q" + CLR_RESET + " Save/Quit  " +
+                                 CLR_CYAN + "H" + CLR_RESET + " Help  Move: Arrows");
+    }
+
+    wnoutrefresh(stdscr);
+    wnoutrefresh(gameWin);
+    doupdate();
+}
+
 void drawMap(const GameState &gs, int cursorRoom) {
     std::vector<std::string> rendered = renderMapLines(gs, cursorRoom);
     for (const std::string &line : rendered)
@@ -576,26 +1357,42 @@ void drawCameraFeed(const GameState &gs) {
 
 static void drawGameInternal(const GameState &gs, int cursorRoom, bool selectingSweep, int selectedGroup) {
     startGameViewport();
+    syncTerminalSize();
     std::vector<std::string> mapLines = renderMapLines(gs, cursorRoom);
     const int mapStartY = 8;
     const int maxLogEvents = 2;
-    int logContentRows = std::max(2, std::min(maxLogEvents, static_cast<int>(gs.eventLog.size())));
-    int compactCommandPanelTop = mapStartY + static_cast<int>(mapLines.size()) + 1 + 2 + logContentRows;
-    activeGameHeight = std::min(GAME_MAX_HEIGHT, std::max(30, compactCommandPanelTop + 5));
+    const int maxLogRows = 3;
+    const int commandPanelRows = 5;
+    int desiredLogRows = std::max(2, std::min(maxLogRows,
+                                              static_cast<int>(gs.eventLog.size()) + 1));
+
+    requiredGameHeight = std::max(GAME_MIN_HEIGHT,
+                                  mapStartY + static_cast<int>(mapLines.size()) +
+                                  1 + 2 + commandPanelRows);
+    activeGameHeight = requiredGameHeight;
 
     if (terminalTooSmallForGameViewport()) {
+        if (terminalCanUseCompactViewport()) {
+            drawCompactGameInternal(gs, cursorRoom, selectingSweep, selectedGroup);
+            return;
+        }
         drawViewportTooSmallMessage();
         return;
     }
 
-    clear();
-    refresh();
+    int maxViewportHeight = std::min(GAME_MAX_HEIGHT, terminalRows);
+    int maxFittingLogRows = std::max(0, maxViewportHeight - requiredGameHeight);
+    int logContentRows = std::min(desiredLogRows, maxFittingLogRows);
+    int compactCommandPanelTop = mapStartY + static_cast<int>(mapLines.size()) + 1 + 2 + logContentRows;
+    activeGameHeight = std::min(maxViewportHeight,
+                                std::max(requiredGameHeight, compactCommandPanelTop + commandPanelRows));
 
     int startY = getCenterY(activeGameHeight);
     int startX = getCenterX(GAME_WIDTH);
-    if (gameWin != nullptr)
-        delwin(gameWin);
-    gameWin = newwin(activeGameHeight, GAME_WIDTH, startY, startX);
+    if (!ensureGameWindow(activeGameHeight, GAME_WIDTH, startY, startX)) {
+        drawViewportTooSmallMessage();
+        return;
+    }
     werase(gameWin);
     box(gameWin, 0, 0);
 
@@ -651,7 +1448,9 @@ static void drawGameInternal(const GameState &gs, int cursorRoom, bool selecting
             mvwaddch(gameWin, row, splitX, '|');
 
         printWindowAnsi(gameWin, panelTop, leftX,
-                        std::string(CLR_BOLD) + "[ SYSTEM EVENT LOG ]" + CLR_RESET,
+                        std::string(CLR_BOLD) +
+                        (gs.lastScanOutput.empty() ? "[ SYSTEM EVENT LOG ]" : "[ SCAN RESULT ]") +
+                        CLR_RESET,
                         leftWidth);
         printWindowAnsi(gameWin, panelTop, rightX,
                         std::string(CLR_BOLD) + "[ ENERGY COST ]" + CLR_RESET,
@@ -659,11 +1458,17 @@ static void drawGameInternal(const GameState &gs, int cursorRoom, bool selecting
 
         y = panelTop + 1;
         int availableRows = std::max(0, logPanelBottom - y);
-        int shownRows = std::min(availableRows, maxLogEvents);
-        int startEvent = std::max(0, (int)gs.eventLog.size() - shownRows);
-        for (size_t i = startEvent; i < gs.eventLog.size() && y < logPanelBottom; i++)
-            printWindowAnsi(gameWin, y++, 2, std::string(CLR_DIM) + "> " + CLR_RESET + gs.eventLog[i],
-                            leftWidth);
+        std::vector<std::string> infoLines =
+            gs.lastScanOutput.empty()
+                ? eventLogDisplayLines(gs.eventLog, maxLogEvents, availableRows, leftWidth)
+                : scanOutputDisplayLines(gs, availableRows, leftWidth - 2);
+        for (const std::string &line : infoLines) {
+            if (y >= logPanelBottom)
+                break;
+            std::string prefix = gs.lastScanOutput.empty() ? std::string(CLR_DIM) : std::string(CLR_CYAN);
+            std::string renderedLine = gs.lastScanOutput.empty() ? line : "> " + line;
+            printWindowAnsi(gameWin, y++, leftX, prefix + renderedLine + CLR_RESET, leftWidth);
+        }
 
         std::vector<std::string> costs = commandCostLines(gs);
         for (size_t i = 0; i < costs.size() && panelTop + 1 + static_cast<int>(i) < logPanelBottom; i++)
@@ -719,7 +1524,9 @@ static void drawGameInternal(const GameState &gs, int cursorRoom, bool selecting
         printWindowCentered(gameWin, activeGameHeight - 2, cursorLine);
     }
 
-    wrefresh(gameWin);
+    wnoutrefresh(stdscr);
+    wnoutrefresh(gameWin);
+    doupdate();
 }
 
 void drawGame(const GameState &gs, int cursorRoom) {
@@ -775,58 +1582,64 @@ void drawDifficultyMenu() {
 }
 
 void drawEndGame(const GameState &gs) {
-    clearScreen();
-    int startY = getCenterY(9);
-    printCentered(startY, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
+    clear();
+    syncTerminalSize();
+    int startY = std::max(1, (terminalRows - 11) / 2);
+    mvaddCenteredCurses(startY, "============================================================", BOOT_GREEN, A_BOLD);
     if (gs.status == STATUS_WIN) {
-        printCentered(startY + 1, std::string(CLR_GREEN CLR_BOLD) + "Y O U   W I N !" + CLR_RESET);
-        printCentered(startY + 3, "You survived all " + std::to_string(gs.totalNights) + " nights at HKU!");
+        mvaddCenteredCurses(startY + 1, "Y O U   W I N !", BOOT_GREEN, A_BOLD);
+        mvaddCenteredCurses(startY + 3, "You survived all " + std::to_string(gs.totalNights) + " nights at HKU!", BOOT_WHITE);
     } else if (gs.status == STATUS_LOSE_ENEMY) {
-        printCentered(startY + 1, std::string(CLR_RED CLR_BOLD) + "G A M E   O V E R" + CLR_RESET);
-        printCentered(startY + 3, "The intruder reached Main Building on");
-        printCentered(startY + 4, "Night " + std::to_string(gs.currentNight) + ", Turn " + std::to_string(gs.turn) + ".");
+        mvaddCenteredCurses(startY + 1, "G A M E   O V E R", BOOT_RED, A_BOLD);
+        mvaddCenteredCurses(startY + 3, "The intruder reached Main Building on", BOOT_WHITE);
+        mvaddCenteredCurses(startY + 4, "Night " + std::to_string(gs.currentNight) + ", Turn " + std::to_string(gs.turn) + ".", BOOT_WHITE);
     } else if (gs.status == STATUS_LOSE_POWER) {
-        printCentered(startY + 1, std::string(CLR_RED CLR_BOLD) + "G A M E   O V E R" + CLR_RESET);
-        printCentered(startY + 3, "Power ran out on Night " + std::to_string(gs.currentNight) + ".");
+        mvaddCenteredCurses(startY + 1, "G A M E   O V E R", BOOT_RED, A_BOLD);
+        mvaddCenteredCurses(startY + 3, "Power ran out on Night " + std::to_string(gs.currentNight) + ".", BOOT_WHITE);
     }
-    printCentered(startY + 6, gs.statusMessage);
-    printCentered(startY + 8, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
-    printCentered(startY + 10, "Press Enter to return to main menu...");
-    std::cout.flush();
+    mvaddCenteredCurses(startY + 6, gs.statusMessage, BOOT_WHITE);
+    mvaddCenteredCurses(startY + 8, "============================================================", BOOT_GREEN, A_BOLD);
+    mvaddCenteredCurses(startY + 10, "Press Enter to return to main menu...", BOOT_WHITE);
+    refresh();
     waitForEnterInput();
 }
 
 void drawHelp() {
-    clearScreen();
-    int startY = getCenterY(23);
-    printCentered(startY, std::string(CLR_BOLD CLR_CYAN) + "================================================================" + CLR_RESET);
-    printCentered(startY + 1, std::string(CLR_BOLD) + "HOW TO PLAY - HKU CAMPUS" + CLR_RESET);
-    printCentered(startY + 2, std::string(CLR_BOLD CLR_CYAN) + "================================================================" + CLR_RESET);
+    clear();
+    syncTerminalSize();
+    int startY = std::max(0, (terminalRows - 20) / 2);
+    mvaddCenteredCurses(startY, "================================================================", BOOT_GREEN, A_BOLD);
+    mvaddCenteredCurses(startY + 1, "HOW TO PLAY - HKU CAMPUS", BOOT_WHITE, A_BOLD);
+    mvaddCenteredCurses(startY + 2, "================================================================", BOOT_GREEN, A_BOLD);
 
     std::vector<std::string> help = {
-        std::string(CLR_BOLD) + "OBJECTIVE:" + CLR_RESET,
-        "Survive until 6 AM by tracking the intruder and protecting " + std::string(CLR_GREEN) + "Main Building (MB)" + CLR_RESET + ".",
+        "OBJECTIVE:",
+        "Survive until 6 AM by tracking intruders and protecting Main Building (MB).",
         "",
-        std::string(CLR_BOLD) + "CONTROLS:" + CLR_RESET,
+        "CONTROLS:",
         "Arrow Keys move cursor | Enter deep scans selected building",
-        std::string(CLR_CYAN) + "[A]" + CLR_RESET + " sweep | " + CLR_CYAN + "[G]" + CLR_RESET + " gate | " +
-            CLR_CYAN + "[L]" + CLR_RESET + " lure | " + CLR_CYAN + "[W]" + CLR_RESET + " wait | " +
-            CLR_CYAN + "[H]" + CLR_RESET + " help | " + CLR_CYAN + "[Q]" + CLR_RESET + " save/quit",
+        "[A] sweep | [G] gate | [L] lure | [W] wait | [H] help | [Q] save/quit",
         "",
-        std::string(CLR_BOLD) + "CAMERA RINGS:" + CLR_RESET,
+        "CAMERA RINGS:",
         "- Quick Sweep reports movement in one cluster only.",
         "- Deep Scan checks the building under the cursor; MB is never clustered.",
         "- Signals decay after a few turns depending on difficulty.",
         "",
-        std::string(CLR_BOLD) + "TIPS:" + CLR_RESET,
+        "TIPS:",
         "- Use cheap sweeps to narrow down expensive deep scans.",
         "- Gate rooms next to MB control office entrances.",
         "- Closed gates cost energy every turn; lure can redirect movement."
     };
-    drawTextBlock(startY + 4, 78, help);
-    printCentered(startY + 21, std::string(CLR_BOLD CLR_CYAN) + "================================================================" + CLR_RESET);
-    printCentered(startY + 22, "Press Enter to go back...");
-    std::cout.flush();
+
+    int y = startY + 4;
+    for (size_t i = 0; i < help.size() && y < terminalRows - 3; i++, y++) {
+        int attrs = (!help[i].empty() && help[i][help[i].size() - 1] == ':') ? A_BOLD : A_NORMAL;
+        int pair = attrs == A_BOLD ? BOOT_GREEN : BOOT_WHITE;
+        mvaddCenteredCurses(y, help[i], pair, attrs);
+    }
+    mvaddCenteredCurses(terminalRows - 3, "================================================================", BOOT_GREEN, A_BOLD);
+    mvaddCenteredCurses(terminalRows - 2, "Press Enter to go back...", BOOT_WHITE);
+    refresh();
     waitForEnterInput();
 }
 
@@ -834,7 +1647,7 @@ int promptInt(const std::string &msg, int lo, int hi) {
     int val;
     syncTerminalSize();
     std::string prompt = trimLeft(msg);
-    int promptY = std::min(std::max(0, LINES - 3), getCenterY(1) + 12);
+    int promptY = std::min(std::max(0, terminalRows - 3), getCenterY(1) + 12);
     printAt(promptY, getCenterX(visibleLength(prompt) + 2), prompt);
     std::cout.flush();
     std::cin >> val;
@@ -851,7 +1664,18 @@ int promptInt(const std::string &msg, int lo, int hi) {
 void pause(const std::string &msg) {
     syncTerminalSize();
     std::string prompt = trimLeft(msg);
-    printCentered(std::min(std::max(0, LINES - 3), getCenterY(1) + 12), prompt);
+    printCentered(std::min(std::max(0, terminalRows - 3), getCenterY(1) + 12), prompt);
+    if (cursesActive) {
+        refresh();
+        nodelay(stdscr, FALSE);
+        int ch;
+        do {
+            ch = getch();
+        } while (ch != '\n' && ch != '\r' && ch != 3 && !terminalInterruptRequested());
+        flushinp();
+        return;
+    }
+
     std::cout.flush();
     std::cin.clear();
     std::cin.get();
