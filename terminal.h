@@ -10,6 +10,7 @@ enum Key {
     KEY_G, KEY_L, KEY_Q, KEY_H,
     KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5,
     KEY_QUESTION,
+    KEY_INTERRUPT,
 };
 
 // Enter raw terminal mode (no echo, no line buffering)
@@ -17,6 +18,9 @@ void initTerminal();
 
 // Restore terminal to original settings
 void restoreTerminal();
+
+// True after SIGINT/SIGTERM/SIGHUP while raw input is active.
+bool terminalInterruptRequested();
 
 // Read a single keypress. Blocks until a key is pressed.
 Key getKey();

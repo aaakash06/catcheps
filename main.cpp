@@ -11,51 +11,60 @@
 #define CLR_RESET   "\033[0m"
 #define CLR_CYAN    "\033[36m"
 
-static int promptNumberedMenu(const std::string &title,
-                              const std::vector<std::string> &options) {
+static int keyToCameraGroupIndex(Key key) {
+    if (key == KEY_1) return 0;
+    if (key == KEY_2) return 1;
+    if (key == KEY_3) return 2;
+    if (key == KEY_4) return 3;
+    if (key == KEY_5) return 4;
+    return -1;
+}
+
+static void exitAfterInterrupt() {
+    stopGameViewport();
     restoreTerminal();
+    std::cout << "\nInterrupted. Terminal restored.\n";
+    std::exit(130);
+}
 
-    while (true) {
-        clearScreen();
-        std::cout << "\n" << title << "\n";
-        for (size_t i = 0; i < options.size(); i++)
-            std::cout << "  " << CLR_CYAN << "[" << (i + 1) << "]" << CLR_RESET
-                      << " " << options[i] << "\n";
-        std::cout << "  " << CLR_CYAN << "[0]" << CLR_RESET << " Cancel\n\n";
-
-        int choice = promptInt("  Select: ", 0, static_cast<int>(options.size()));
-        if (choice == 0) {
-            initTerminal();
-            return -1;
-        }
-        if (choice >= 1 && choice <= static_cast<int>(options.size())) {
-            initTerminal();
-            return choice - 1;
-        }
-
-        std::cout << "  Invalid choice.\n";
-        pause("  Press Enter to try again...");
+static int initialCameraGroupSelection(GameState &gs, int cursorRoom) {
+    int groupCount = effectiveCameraGroupCount(gs.gameMap);
+    for (int i = 0; i < groupCount; i++) {
+        if (roomInCameraGroup(gs.gameMap, cursorRoom, i))
+            return i;
     }
+    return 0;
 }
 
 static int selectCameraGroup(GameState &gs, int cursorRoom) {
-    std::vector<std::string> options;
     int groupCount = effectiveCameraGroupCount(gs.gameMap);
-    for (int i = 0; i < groupCount; i++) {
-        auto roomIds = roomsInGroup(gs.gameMap, i);
-        std::string option = cameraGroupLabel(gs.gameMap, i) + " (";
-        for (size_t j = 0; j < roomIds.size(); j++) {
-            if (j > 0) option += ", ";
-            option += gs.gameMap.rooms[roomIds[j]].abbrev;
-        }
-        option += ")";
-        if (roomInCameraGroup(gs.gameMap, cursorRoom, i))
-            option += " <- cursor location";
-        options.push_back(option);
-    }
-    if (options.empty())
+    if (groupCount <= 0)
         return -1;
-    return promptNumberedMenu("  Select camera cluster:", options);
+
+    int selectedGroup = initialCameraGroupSelection(gs, cursorRoom);
+    while (true) {
+        drawSweepSelection(gs, cursorRoom, selectedGroup);
+        Key key = getKey();
+
+        if (key == KEY_INTERRUPT)
+            exitAfterInterrupt();
+        if (key == KEY_ENTER)
+            return selectedGroup;
+        if (key == KEY_ESCAPE || key == KEY_0 || key == KEY_A || key == KEY_Q)
+            return -1;
+
+        int directChoice = keyToCameraGroupIndex(key);
+        if (directChoice >= 0 && directChoice < groupCount) {
+            selectedGroup = directChoice;
+            continue;
+        }
+
+        if (key == KEY_LEFT || key == KEY_UP) {
+            selectedGroup = (selectedGroup + groupCount - 1) % groupCount;
+        } else if (key == KEY_RIGHT || key == KEY_DOWN) {
+            selectedGroup = (selectedGroup + 1) % groupCount;
+        }
+    }
 }
 
 static void runGameLoop(GameState &gs) {
@@ -65,6 +74,9 @@ static void runGameLoop(GameState &gs) {
         drawGame(gs, cursorRoom);
 
         Key k = getKey();
+
+        if (k == KEY_INTERRUPT)
+            exitAfterInterrupt();
 
         if (k == KEY_UP) {
             cursorRoom = getNextRoomNav(gs, cursorRoom, 0);
@@ -103,6 +115,7 @@ static void runGameLoop(GameState &gs) {
             gs.doTurn(5, -1);
         } else if (k == KEY_Q) {
             // Save & quit
+            stopGameViewport();
             restoreTerminal();
             if (saveGame(gs, SAVE_FILE))
                 std::cout << "\n  Game saved! Returning to menu...\n";
@@ -112,10 +125,16 @@ static void runGameLoop(GameState &gs) {
             return;
         } else if (k == KEY_H || k == KEY_QUESTION) {
             // Help overlay
+            stopGameViewport();
+            restoreTerminal();
             drawHelp();
+            initTerminal();
+            startGameViewport();
         }
     }
 
+    stopGameViewport();
+    restoreTerminal();
     drawEndGame(gs);
 }
 
@@ -130,7 +149,9 @@ int main() {
         if (choice == -1) continue;
 
         if (choice == 0) {
-            std::cout << "  Thanks for playing Camera Watch - HKU Campus!\n";
+            clearScreen();
+            printCentered(getCenterY(1), "Thanks for playing Camera Watch - HKU Campus!");
+            std::cout << "\n";
             break;
         } else if (choice == 1) {
             drawDifficultyMenu();
@@ -141,7 +162,9 @@ int main() {
             gs.init(static_cast<Difficulty>(diff - 1));
 
             initTerminal();
+            startGameViewport();
             runGameLoop(gs);
+            stopGameViewport();
             restoreTerminal();
         } else if (choice == 2) {
             GameState gs;
@@ -149,7 +172,9 @@ int main() {
                 std::cout << "  Game loaded!\n";
                 pause("  Press Enter to continue...");
                 initTerminal();
+                startGameViewport();
                 runGameLoop(gs);
+                stopGameViewport();
                 restoreTerminal();
             } else {
                 if (!gs.statusMessage.empty())
