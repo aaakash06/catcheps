@@ -1,4 +1,5 @@
 *.o
+*.d
 camerawatch_save.txt
 protocol1911_save.txt
 camerawatch

@@ -3,7 +3,8 @@
 #include <limits>
 #include <sstream>
 
-static const char *SAVE_MAGIC = "CW_SAVE_V4";
+static const char *SAVE_MAGIC = "CW_SAVE_V5";
+static const char *SAVE_MAGIC_V4 = "CW_SAVE_V4";
 static const char *SAVE_MAGIC_V3 = "CW_SAVE_V3";
 static const char *SAVE_MAGIC_V2 = "CW_SAVE_V2";
 
@@ -82,6 +83,7 @@ bool saveGame(const GameState &gs, const std::string &filename) {
     out << gs.currentLureCooldown << "\n";
     out << gs.lastKnownEnemyRoom << "\n";
     out << gs.lastKnownEnemyTurn << "\n";
+    out << gs.scansUsed << "\n";
 
     out << gs.enemy.currentRoom << "\n";
     out << gs.enemy.lastRoom << "\n";
@@ -125,9 +127,13 @@ bool loadGame(GameState &gs, const std::string &filename) {
     bool legacyFormat = false;
     bool version2Format = false;
     bool version3Format = false;
+    bool version4Format = false;
     int diffInt = -1;
     if (firstToken == SAVE_MAGIC) {
         if (!readValue(in, diffInt)) return false;
+    } else if (firstToken == SAVE_MAGIC_V4) {
+        if (!readValue(in, diffInt)) return false;
+        version4Format = true;
     } else if (firstToken == SAVE_MAGIC_V3) {
         if (!readValue(in, diffInt)) return false;
         version3Format = true;
@@ -190,7 +196,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
         return false;
     }
 
-    if (firstToken == SAVE_MAGIC || version3Format) {
+    if (firstToken == SAVE_MAGIC || version4Format || version3Format) {
         if (!readValue(in, savedGateUpkeepCost))
             return failLoad(gs, "Save rejected: invalid gate upkeep state.");
     } else if (legacyFormat) {
@@ -210,7 +216,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
         return failLoad(gs, "Save rejected: invalid core tuning values.");
     }
 
-    if (firstToken == SAVE_MAGIC || version3Format) {
+    if (firstToken == SAVE_MAGIC || version4Format || version3Format) {
         if (!readValue(in, savedLureDurationTurns) ||
             !readValue(in, savedLureWeightMultiplier)) {
             return failLoad(gs, "Save rejected: invalid lure tuning values.");
@@ -221,6 +227,12 @@ bool loadGame(GameState &gs, const std::string &filename) {
         !readValue(in, gs.lastKnownEnemyRoom) ||
         !readValue(in, gs.lastKnownEnemyTurn)) {
         return failLoad(gs, "Save rejected: invalid signal memory state.");
+    }
+    if (firstToken == SAVE_MAGIC) {
+        if (!readValue(in, gs.scansUsed))
+            return failLoad(gs, "Save rejected: invalid scan counter.");
+    } else {
+        gs.scansUsed = 0;
     }
 
     gs.currentNight = savedCurrentNight;
@@ -261,7 +273,8 @@ bool loadGame(GameState &gs, const std::string &filename) {
         gs.moveCloserProb < 0 || gs.moveSidewaysProb < 0 || gs.moveRandomProb < 0 ||
         gs.lureCooldownMax < 0 || gs.lureDurationTurns < 0 ||
         gs.lureWeightMultiplier <= 0.0 ||
-        gs.currentLureCooldown < 0 || gs.currentLureCooldown > gs.lureCooldownMax) {
+        gs.currentLureCooldown < 0 || gs.currentLureCooldown > gs.lureCooldownMax ||
+        gs.scansUsed < 0) {
         return failLoad(gs, "Save rejected: invalid difficulty settings.");
     }
 
@@ -296,7 +309,7 @@ bool loadGame(GameState &gs, const std::string &filename) {
     gs.gameMap.rooms.resize(gs.gameMap.totalRooms);
     if (!readValue(in, gs.leftGateClosed))
         return failLoad(gs, "Save rejected: invalid gate state.");
-    if (firstToken == SAVE_MAGIC) {
+    if (firstToken == SAVE_MAGIC || version4Format) {
         if (!readValue(in, gs.centerGateClosed))
             return failLoad(gs, "Save rejected: invalid gate state.");
     } else {

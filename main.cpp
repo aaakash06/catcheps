@@ -127,7 +127,6 @@ static void runGameLoop(GameState &gs) {
         }
     }
 
-    stopGameViewport();
     drawEndGame(gs);
 }
 

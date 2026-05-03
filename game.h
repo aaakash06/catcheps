@@ -34,6 +34,7 @@ struct GameState {
     int lureDurationTurns;
     double lureWeightMultiplier;
     int currentLureCooldown;
+    int scansUsed;
     bool leftGateClosed;
     bool centerGateClosed;
     bool rightGateClosed;

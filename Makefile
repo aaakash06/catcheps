@@ -1,9 +1,10 @@
 CXX := g++
-CXXFLAGS := -std=c++11 -Wall -Wextra -pedantic
+CXXFLAGS := -std=c++11 -Wall -Wextra -pedantic -MMD -MP
 LDLIBS := -lncurses
 TARGET := protocol1911
 SOURCES := main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp
 OBJECTS := $(SOURCES:.cpp=.o)
+DEPS := $(OBJECTS:.o=.d)
 
 .PHONY: all clean run
 
@@ -19,4 +20,6 @@ run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(OBJECTS) $(TARGET) camerawatch
+	rm -f $(OBJECTS) $(DEPS) $(TARGET) camerawatch
+
+-include $(DEPS)

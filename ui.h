@@ -41,13 +41,7 @@ void drawGame(const GameState &gs, int cursorRoom);
 // Draw the game HUD with an in-panel Quick Sweep cluster picker.
 void drawSweepSelection(const GameState &gs, int cursorRoom, int selectedGroup);
 
-// Draw the spatial ASCII map.
-void drawMap(const GameState &gs, int cursorRoom);
-
-// Draw camera check results.
-void drawCameraFeed(const GameState &gs);
-
-// Draw end game screen.
+// Play the cinematic end state, then draw the final prompt.
 void drawEndGame(const GameState &gs);
 
 // Display a message and wait for enter.

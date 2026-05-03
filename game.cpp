@@ -239,6 +239,7 @@ GameState::GameState() : difficulty(EASY), currentNight(1), totalNights(3),
     signalDecayTurns(4), audioProbDistance3(25), audioProbDistance2(40), audioProbDistance1(65),
     moveCloserProb(50), moveSidewaysProb(30), moveRandomProb(20),
     lureCooldownMax(3), lureDurationTurns(3), lureWeightMultiplier(2.5), currentLureCooldown(0),
+    scansUsed(0),
     leftGateClosed(false), centerGateClosed(false), rightGateClosed(false),
     lastKnownEnemyRoom(-1), lastKnownEnemyTurn(-9999),
     status(STATUS_PLAYING) {}
@@ -249,6 +250,7 @@ void GameState::init(Difficulty diff) {
     gameMap = buildMap(diff);
     power = maxPower;
     currentNight = 1;
+    scansUsed = 0;
     status = STATUS_PLAYING;
     statusMessage = "";
     eventLog.clear();
@@ -335,8 +337,10 @@ void GameState::finishSuccessfulTurn(int action) {
     power -= activeGateCount * gateUpkeepPowerCost;
     if (power < 0) power = 0;
 
+    int nightBeforeCheck = currentNight;
     checkConditions();
-    updateProbMap();
+    if (status == STATUS_PLAYING && currentNight == nightBeforeCheck)
+        updateProbMap();
 }
 
 // Advances the enemy exactly once for the turn and records a compact hidden-state log entry.
@@ -410,6 +414,7 @@ void GameState::quickSweep(int group) {
     }
 
     power -= cameraPowerCost;
+    scansUsed++;
     std::string label = cameraGroupLabel(gameMap, group);
     auto roomIds = roomsInGroup(gameMap, group);
     bool movementDetected = std::find(roomIds.begin(), roomIds.end(), enemy.currentRoom) != roomIds.end();
@@ -442,6 +447,7 @@ void GameState::deepScan(int roomId) {
     }
 
     power -= deepScanPowerCost;
+    scansUsed++;
     std::string label = gameMap.rooms[roomId].abbrev;
     lastScanOutput.push_back("DEEP SCAN - " + label);
 

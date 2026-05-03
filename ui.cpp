@@ -1334,21 +1334,6 @@ static void drawCompactGameInternal(const GameState &gs, int cursorRoom, bool se
     doupdate();
 }
 
-void drawMap(const GameState &gs, int cursorRoom) {
-    std::vector<std::string> rendered = renderMapLines(gs, cursorRoom);
-    for (const std::string &line : rendered)
-        std::cout << "  " << line << "\n";
-}
-
-void drawCameraFeed(const GameState &gs) {
-    if (gs.lastScanOutput.empty()) return;
-
-    std::cout << CLR_BOLD << "  Scan Result:" << CLR_RESET << "\n";
-    for (size_t i = 0; i < gs.lastScanOutput.size(); i++)
-        std::cout << "  " << CLR_CYAN << gs.lastScanOutput[i] << CLR_RESET << "\n";
-    std::cout << "\n";
-}
-
 static void drawGameInternal(const GameState &gs, int cursorRoom, bool selectingSweep, int selectedGroup) {
     startGameViewport();
     syncTerminalSize();
@@ -1531,27 +1516,260 @@ void drawSweepSelection(const GameState &gs, int cursorRoom, int selectedGroup) 
     drawGameInternal(gs, cursorRoom, true, selectedGroup);
 }
 
-void drawEndGame(const GameState &gs) {
-    clear();
-    syncTerminalSize();
-    int startY = std::max(1, (terminalRows - 11) / 2);
-    mvaddCenteredCurses(startY, "============================================================", BOOT_GREEN, A_BOLD);
-    if (gs.status == STATUS_WIN) {
-        mvaddCenteredCurses(startY + 1, "Y O U   W I N !", BOOT_GREEN, A_BOLD);
-        mvaddCenteredCurses(startY + 3, "You survived all " + std::to_string(gs.totalNights) + " nights at HKU!", BOOT_WHITE);
-    } else if (gs.status == STATUS_LOSE_ENEMY) {
-        mvaddCenteredCurses(startY + 1, "G A M E   O V E R", BOOT_RED, A_BOLD);
-        mvaddCenteredCurses(startY + 3, "The intruder reached Main Building on", BOOT_WHITE);
-        mvaddCenteredCurses(startY + 4, "Night " + std::to_string(gs.currentNight) + ", Turn " + std::to_string(gs.turn) + ".", BOOT_WHITE);
-    } else if (gs.status == STATUS_LOSE_POWER) {
-        mvaddCenteredCurses(startY + 1, "G A M E   O V E R", BOOT_RED, A_BOLD);
-        mvaddCenteredCurses(startY + 3, "Power ran out on Night " + std::to_string(gs.currentNight) + ".", BOOT_WHITE);
+static void blankGameRect(int top, int bottom, int left, int right) {
+    if (gameWin == nullptr)
+        return;
+
+    int maxY = 0;
+    int maxX = 0;
+    getmaxyx(gameWin, maxY, maxX);
+    top = std::max(0, std::min(top, maxY - 1));
+    bottom = std::max(0, std::min(bottom, maxY - 1));
+    left = std::max(0, std::min(left, maxX - 1));
+    right = std::max(0, std::min(right, maxX - 1));
+    if (top > bottom || left > right)
+        return;
+
+    for (int y = top; y <= bottom; y++) {
+        for (int x = left; x <= right; x++)
+            mvwaddch(gameWin, y, x, ' ');
     }
-    mvaddCenteredCurses(startY + 6, gs.statusMessage, BOOT_WHITE);
-    mvaddCenteredCurses(startY + 8, "============================================================", BOOT_GREEN, A_BOLD);
-    mvaddCenteredCurses(startY + 10, "Press Enter to return to main menu...", BOOT_WHITE);
+}
+
+static void eraseGameWindowForStdScreen() {
+    if (gameWin != nullptr) {
+        werase(gameWin);
+        wrefresh(gameWin);
+    }
+    clear();
     refresh();
+}
+
+static void typeCenteredCursesLine(int y, const std::string &text,
+                                   int colorPair, int attrs, int delayMs) {
+    syncTerminalSize();
+    int x = std::max(0, (terminalCols - static_cast<int>(text.size())) / 2);
+    attrOnPair(colorPair, attrs);
+    for (size_t i = 0; i < text.size(); i++) {
+        mvaddch(y, x + static_cast<int>(i), text[i]);
+        refresh();
+        napms(delayMs);
+    }
+    attrOffPair(colorPair, attrs);
+}
+
+static void promptReturnToMenu() {
+    syncTerminalSize();
+    int promptY = std::max(0, std::min(std::max(0, terminalRows - 2), getCenterY(1) + 9));
+    mvaddCenteredCurses(promptY,
+                        "PRESS [ENTER] TO RETURN TO MENU", BOOT_WHITE, A_BOLD);
+    refresh();
+    flushinp();
     waitForEnterInput();
+    clear();
+    refresh();
+    flushinp();
+}
+
+static void drawPowerFailureSequence(const GameState &gs) {
+    if (gameWin != nullptr) {
+        int maxY = 0;
+        int maxX = 0;
+        getmaxyx(gameWin, maxY, maxX);
+
+        blankGameRect(8, maxY - 11, 1, maxX - 2);
+        wrefresh(gameWin);
+        napms(400);
+
+        blankGameRect(std::max(5, maxY - 11), maxY - 6, 1, maxX - 2);
+        wrefresh(gameWin);
+        napms(400);
+
+        blankGameRect(0, 0, 0, maxX - 1);
+        blankGameRect(maxY - 1, maxY - 1, 0, maxX - 1);
+        blankGameRect(0, maxY - 1, 0, 0);
+        blankGameRect(0, maxY - 1, maxX - 1, maxX - 1);
+        blankGameRect(2, 2, 1, maxX - 2);
+        blankGameRect(4, 4, 1, maxX - 2);
+        blankGameRect(maxY - 5, maxY - 5, 1, maxX - 2);
+        wrefresh(gameWin);
+        napms(400);
+
+        werase(gameWin);
+        std::string energy = "[ ENERGY COST ] 0%";
+        int y = std::max(0, maxY / 2);
+        int x = std::max(0, (maxX - static_cast<int>(energy.size())) / 2);
+        for (int i = 0; i < 5; i++) {
+            werase(gameWin);
+            if (i % 2 == 0) {
+                wattron(gameWin, A_BLINK | A_BOLD | COLOR_PAIR(VP_RED));
+                mvwprintw(gameWin, y, x, "%s", energy.c_str());
+                wattroff(gameWin, A_BLINK | A_BOLD | COLOR_PAIR(VP_RED));
+            }
+            wrefresh(gameWin);
+            napms(240);
+        }
+        werase(gameWin);
+        wrefresh(gameWin);
+        napms(350);
+    }
+
+    eraseGameWindowForStdScreen();
+    int y = getCenterY(5);
+    mvaddCenteredCurses(y, "POWER DEPLETED", BOOT_RED, A_BOLD);
+    typeCenteredCursesLine(y + 2, "> CRITICAL POWER FAILURE. LIFE SUPPORT OFFLINE.",
+                           BOOT_RED, A_BOLD, 45);
+    if (!gs.statusMessage.empty())
+        mvaddCenteredCurses(y + 4, gs.statusMessage, BOOT_WHITE);
+    promptReturnToMenu();
+}
+
+static void drawBreachSequence(const GameState &gs) {
+    if (gameWin != nullptr) {
+        int maxY = 0;
+        int maxX = 0;
+        getmaxyx(gameWin, maxY, maxX);
+
+        beep();
+        for (int flash = 0; flash < 3; flash++) {
+            for (int y = 0; y < maxY; y++)
+                mvwchgat(gameWin, y, 0, maxX, A_REVERSE | A_BOLD, VP_RED, nullptr);
+            wrefresh(gameWin);
+            napms(50);
+
+            for (int y = 0; y < maxY; y++)
+                mvwchgat(gameWin, y, 0, maxX, A_NORMAL, VP_WHITE, nullptr);
+            wrefresh(gameWin);
+            napms(50);
+        }
+
+        const char symbols[] = { '#', '@', '%', '&', '!', '?', '$', '*' };
+        for (int i = 0; i < 140; i++) {
+            int y = maxY > 2 ? 1 + std::rand() % (maxY - 2) : 0;
+            int x = maxX > 2 ? 1 + std::rand() % (maxX - 2) : 0;
+            char ch = symbols[std::rand() % (sizeof(symbols) / sizeof(symbols[0]))];
+            mvwaddch(gameWin, y, x, static_cast<chtype>(ch) | A_BOLD | COLOR_PAIR(VP_RED));
+            wrefresh(gameWin);
+            napms(5);
+        }
+
+        werase(gameWin);
+        wrefresh(gameWin);
+        napms(120);
+    }
+
+    eraseGameWindowForStdScreen();
+    int y = getCenterY(5);
+    mvaddCenteredCurses(y, "CONNECTION SEVERED", BOOT_RED, A_BOLD);
+    typeCenteredCursesLine(y + 2, "> CONNECTION SEVERED. FOOTSTEPS DETECTED INSIDE SERVER ROOM.",
+                           BOOT_RED, A_BOLD, 22);
+    if (!gs.statusMessage.empty())
+        mvaddCenteredCurses(y + 4, gs.statusMessage, BOOT_WHITE);
+    promptReturnToMenu();
+}
+
+static void drawSurvivedArt(int startY) {
+    std::vector<std::string> art = {
+        " SSS   U   U  RRRR   V   V  III  V   V  EEEEE  DDDD ",
+        "S      U   U  R   R  V   V   I   V   V  E      D   D",
+        " SSS   U   U  RRRR   V   V   I   V   V  EEEE   D   D",
+        "    S  U   U  R  R    V V    I    V V   E      D   D",
+        "SSSS    UUU   R   R    V    III    V    EEEEE  DDDD "
+    };
+
+    int width = 0;
+    for (const std::string &line : art)
+        width = std::max(width, static_cast<int>(line.size()));
+    int x = std::max(0, (terminalCols - width) / 2);
+
+    attrOnPair(BOOT_GREEN, A_BOLD);
+    for (int col = 1; col <= width; col++) {
+        for (size_t row = 0; row < art.size(); row++) {
+            int visible = std::min(col, static_cast<int>(art[row].size()));
+            mvaddnstr(startY + static_cast<int>(row), x, art[row].c_str(), visible);
+        }
+        refresh();
+        napms(18);
+    }
+    attrOffPair(BOOT_GREEN, A_BOLD);
+}
+
+static void drawVictorySequence(const GameState &gs) {
+    if (gameWin != nullptr) {
+        GameState safeState = gs;
+        safeState.lastKnownEnemyRoom = -1;
+        safeState.lastKnownEnemyTurn = -9999;
+        safeState.leftGateClosed = false;
+        safeState.centerGateClosed = false;
+        safeState.rightGateClosed = false;
+        safeState.lastScanOutput.clear();
+        safeState.eventLog.clear();
+        for (std::map<int, double>::iterator it = safeState.probMap.begin();
+             it != safeState.probMap.end(); ++it) {
+            it->second = 0.0;
+        }
+
+        const std::vector<std::string> logLines = {
+            "> [06:00] EXTERNAL LIGHT DETECTED.",
+            "> THREAT SIGNATURES FADING...",
+            "> AUTOMATED LOCKDOWN LIFTED."
+        };
+
+        int cursorRoom = safeState.gameMap.officeId;
+        drawGameInternal(safeState, cursorRoom, false, 0);
+        napms(250);
+
+        for (size_t lineIndex = 0; lineIndex < logLines.size(); lineIndex++) {
+            for (size_t chars = 1; chars <= logLines[lineIndex].size(); chars++) {
+                safeState.eventLog.clear();
+                for (size_t previous = 0; previous < lineIndex; previous++)
+                    safeState.eventLog.push_back(logLines[previous]);
+                safeState.eventLog.push_back(logLines[lineIndex].substr(0, chars));
+                drawGameInternal(safeState, cursorRoom, false, 0);
+                napms(24);
+            }
+            napms(170);
+        }
+
+        int maxY = 0;
+        int maxX = 0;
+        getmaxyx(gameWin, maxY, maxX);
+        for (int y = 1; y < maxY - 1; y++) {
+            blankGameRect(y, y, 1, maxX - 2);
+            wrefresh(gameWin);
+            napms(18);
+        }
+        werase(gameWin);
+        wrefresh(gameWin);
+    }
+
+    eraseGameWindowForStdScreen();
+    int artY = std::max(1, getCenterY(10));
+    drawSurvivedArt(artY);
+    mvaddCenteredCurses(artY + 6,
+                        "Battery Remaining: " + std::to_string(gs.power) + "%", BOOT_WHITE);
+    mvaddCenteredCurses(artY + 7,
+                        "Scans Used: " + std::to_string(gs.scansUsed), BOOT_WHITE);
+    if (!gs.statusMessage.empty())
+        mvaddCenteredCurses(artY + 8, gs.statusMessage, BOOT_GREEN, A_BOLD);
+    promptReturnToMenu();
+}
+
+void drawEndGame(const GameState &gs) {
+    if (cursesActive) {
+        nodelay(stdscr, FALSE);
+        flushinp();
+    }
+
+    if (gs.status == STATUS_LOSE_POWER) {
+        drawPowerFailureSequence(gs);
+    } else if (gs.status == STATUS_LOSE_ENEMY) {
+        drawBreachSequence(gs);
+    } else if (gs.status == STATUS_WIN) {
+        drawVictorySequence(gs);
+    } else {
+        promptReturnToMenu();
+    }
 }
 
 void drawHelp() {

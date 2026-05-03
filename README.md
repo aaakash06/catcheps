@@ -1,7 +1,7 @@
-# Camera Watch - HKU Campus
+# Protocol 1911 - HKU Campus
 
 ## Overview
-Camera Watch is a terminal-based survival / strategy game inspired by Five Nights-style information management. The player defends Main Building (`MB`) by scanning camera clusters, performing exact room scans, using lures, and controlling office gates at key approach buildings.
+Protocol 1911 is a terminal-based survival / strategy game inspired by Five Nights-style information management. The player defends Main Building (`MB`) by scanning camera clusters, performing exact room scans, using lures, and controlling office gates at key approach buildings.
 
 The goal is to survive until 6 AM across multiple nights while managing limited energy and incomplete information.
 
@@ -9,8 +9,8 @@ The goal is to survive until 6 AM across multiple nights while managing limited 
 Compile on the HKU Linux / academy server from the project root:
 
 ```bash
-g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o camerawatch -lncurses
-./camerawatch
+g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o protocol1911 -lncurses
+./protocol1911
 ```
 
 Run the executable from the repository root so the ASCII templates in `maps/` can be loaded correctly.
@@ -238,7 +238,7 @@ This makes the enemy feel like it is stalking the player instead of wandering ai
 - `MB` is reachable through three gate rooms: `KAD`, `LIB`, and `KNOW`
 
 ## Save / Load
-- The game saves to `camerawatch_save.txt`
+- The game saves to `protocol1911_save.txt`
 - ASCII maps are loaded from:
   - `maps/map_easy.txt`
   - `maps/map_normal.txt`
