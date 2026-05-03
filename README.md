@@ -1,281 +1,404 @@
-# Camera Watch - HKU Campus
+# Protocol 1911
+
+## Team Members
+
+- Aakash Bagale Thapa (3036478588)
+- Pham Khanh Huyen (3036517384)
+- Lam Pun Chak (3036590453)
+
+---
+
+## Menu
+
+1. [Overview](#overview)
+2. [Build and Run](#build-and-run)
+3. [Controls](#controls)
+4. [Demo Video](#demo-video)
+5. [Gameplay Features](#gameplay-features)
+6. [Difficulty Levels](#difficulty-levels)
+7. [Save and Load](#save-and-load)      
+8. [Code Structure](#code-structure)
+9. [COMP2113 Requirement Relevance](#comp2113-requirement-relevance)
+10. [Known Limitations](#known-limitations)
+
+---
 
 ## Overview
-Camera Watch is a terminal-based survival / strategy game inspired by Five Nights-style information management. The player defends Main Building (`MB`) by scanning camera clusters, performing exact room scans, using lures, and controlling office gates at key approach buildings.
 
-The goal is to survive until 6 AM across multiple nights while managing limited energy and incomplete information.
+**Protocol 1911** is a terminal-based survival strategy game set on the HKU campus.
+
+The player defends Main Building (`MB`) from an intruder by using camera scans, audio lures, and security gates while managing limited energy. The goal is to survive until **6 AM** across multiple nights.
+
+The game is designed for the HKU **COMP2113** course project and runs in a Linux terminal through SSH.
+
+---
 
 ## Build and Run
-Compile on the HKU Linux / academy server from the project root:
+
+Compile and run from the project root on the HKU Linux / academy server:
 
 ```bash
-g++ -std=c++11 main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o camerawatch -lncurses
-./camerawatch
+make clean
+make
+./protocol1911
 ```
 
-Run the executable from the repository root so the ASCII templates in `maps/` can be loaded correctly.
-The in-game HUD uses the standard Linux `ncurses` library for its centered bordered viewport, so link with `-lncurses`.
+Equivalent manual compile command:
+
+```bash
+g++ -std=c++11 -Wall -Wextra -pedantic main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp -o protocol1911 -lncurses
+./protocol1911
+```
+
+Run the executable from the repository root so that the ASCII map templates in `maps/` can be loaded correctly.
+
+The game uses the standard Linux `ncurses` library for terminal UI rendering. No other non-standard libraries are required.
+
+---
 
 ## Controls
-- `Arrow Keys`: move the cursor between connected buildings
-- `Enter`: Deep Scan the selected building
-- `G`: toggle the gate at the selected building (`KAD` / `KNOW`, plus `LIB` in Hard mode)
-- `A`: Quick Sweep a camera cluster
-- `L`: place a lure at the selected building
-- `W`: wait / listen
-- `Q`: save and quit
-- `H`: help
 
-## Cluster-Based Per-Turn Ping System
-The camera system is no longer always-on.
+| Key        | Action                                      |
+| ---------- | ------------------------------------------- |
+| Arrow Keys | Move the cursor between connected buildings |
+| Enter      | Deep Scan the selected building             |
+| G          | Toggle the gate at the selected building    |
+| A          | Quick Sweep a camera cluster                |
+| L          | Place a lure at the selected building       |
+| W / Space  | Wait / listen                               |
+| Q          | Save and quit                               |
+| H / ?      | Show help screen                            |
 
-Each turn, the player must actively choose whether to spend energy on information:
-- `Quick Sweep`: scans one camera cluster and only reports whether movement is present in that cluster
-- `Deep Scan`: scans one exact room and can confirm the enemy's precise location
+Gate buildings:
 
-After the turn ends, the scan is gone. If the player wants updated information on a later turn, they must scan again.
+| Difficulty    | Gate Buildings       |
+| ------------- | -------------------- |
+| Easy / Normal | `KAD`, `KNOW`        |
+| Hard          | `KAD`, `LIB`, `KNOW` |
 
-This creates survival-horror tension because the player must keep deciding between:
-- broad but cheap information
-- precise but expensive confirmation
-- cursor-based gate defense
-- cursor-based lure placement
-- waiting and relying on audio
+---
 
-## Quick Sweep vs Deep Scan
-### Quick Sweep
-- Checks one camera cluster
-- Uses a numbered cluster menu
-- Cheaper than Deep Scan
-- Does not reveal the exact room
+## Demo Video
 
-Example:
-- `QUICK SWEEP - West Flank`
-- `Movement detected in West Flank.`
+A 2:30 minutes short Demonstration Video
+Allows you to easily undestand the game
 
-### Deep Scan
-- Checks one exact building
-- Uses the current cursor location
-- Costs more energy
-- Reveals the exact room if the enemy is there
+[Watch the Demo Video](https://files.fm/u/fquvt77y8d)
+-Copy the link or open it directly to watch
 
-Example:
-- `DEEP SCAN - LIB`
-- `Enemy detected at LIB.`
+---
 
-## Gate Control
-- Gates are controlled with the cursor and `G`
-- `KAD` and `KNOW` are the standard gate nodes
-- Hard mode adds a third center gate at `LIB`
-- Closing a gate costs energy
-- Opening a gate costs `0` energy but still uses the turn
-- There is no command to close both gates at once
+## Gameplay Features
 
-## Energy Cost by Difficulty
-### Easy
-- Quick Sweep: `1%`
-- Deep Scan: `2%`
-- Gate close cost: `1%`
-- Door upkeep: `1%` per turn while the gate stays closed
-- Lure: `2%`
+### Core Turn System
 
-### Normal
-- Quick Sweep: `2%`
-- Deep Scan: `4%`
-- Gate close cost: `2%`
-- Door upkeep: `1%` per turn while the gate stays closed
-- Lure: `4%`
+Each turn, the player chooses one action. Then the enemy may move, energy may be drained, hints may appear, and win/loss conditions are checked.
 
-### Hard
-- Quick Sweep: `2%`
-- Deep Scan: `5%`
-- Gate close cost: `2%`
-- Door upkeep: `1%` per turn while the gate stays closed
-- Lure: `4%`
+The player wins by surviving until **6 AM**.
 
-### Wait Rule
-`Wait / Listen` is intentionally free.
-- the turn still advances
-- the enemy still moves
-- win/loss checks still happen
-- no direct action energy is drained on a pure wait turn
+The player loses if:
 
-### Door Upkeep Rule
-- upkeep is charged per `closed` office gate, not per open gate
-- `0` closed gates = `0` door upkeep
-- `1` closed gate = upkeep for `1`
-- `2` closed gates = upkeep for `2`
-- Hard mode can have `3` closed gates = upkeep for `3`
-- this upkeep applies every turn while a gate remains closed, including `Wait` turns
+- the enemy reaches `MB`, or
+- energy reaches `0%`.
 
-This keeps waiting free as an action, but closed gates still tax the power grid.
+---
 
-## Audio Hint System
-Audio hints are probabilistic but never fake. If a hint appears, it is based on the enemy's real distance from the office after the enemy moves.
+### Camera System
 
-If the enemy is 4 or more steps away from the office, no audio hint is generated.
+The cameras are not always active. The player must spend energy to scan.
 
-### Audio Hint Probability by Distance
-#### Easy
-- 3 steps away: `25%`
-- 2 steps away: `40%`
-- 1 step away: `65%`
+| Scan Type   | Description                                                                                                       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------- |
+| Quick Sweep | Scans one camera cluster and reports whether movement is detected. It is cheap but imprecise.                     |
+| Deep Scan   | Scans the selected building and confirms the enemy only if it is exactly there. It is more expensive but precise. |
 
-#### Normal
-- 3 steps away: `20%`
-- 2 steps away: `35%`
-- 1 step away: `60%`
+Example Quick Sweep output:
 
-#### Hard
-- 3 steps away: `10%`
-- 2 steps away: `25%`
-- 1 step away: `45%`
+```text
+QUICK SWEEP - West
+Movement detected in the selected camera cluster.
+```
 
-### Design Intention
-- Easy hints are clearer and more frequent
-- Normal hints are useful but vague
-- Hard hints are rarer and more atmospheric
+Example Deep Scan output:
 
-Audio is a support tool. It does not replace cameras.
+```text
+DEEP SCAN - LIB
+Enemy detected at LIB.
+```
 
-## Signal Decay System
-When a Deep Scan finds the enemy, the game stores:
-- the exact room
-- the turn when that room was detected
+---
+
+### Signal Memory
+
+Signal memory stores the last known enemy room and the turn when that information was recorded.
+
+At the start of each night, the game initializes the last known enemy room to the enemy's spawn location. During gameplay, a successful Deep Scan can update this information with a newly confirmed room.
 
 The signal then decays over time:
 
-### Easy
-- current turn: `Strong`
-- next three turns: `Weak`
-- then: `Gone`
-
-### Normal
-- current turn: `Strong`
-- next two turns: `Weak`
-- then: `Gone`
-
-### Hard
-- current turn: `Strong`
-- next turn: `Weak`
-- then: `Gone`
+| Difficulty | Strong Signal | Weak Signal  | Gone       |
+| ---------- | ------------- | ------------ | ---------- |
+| Easy       | current turn  | next 3 turns | after that |
+| Normal     | current turn  | next 2 turns | after that |
+| Hard       | current turn  | next 2 turns | after that |
 
 Display examples:
-- current turn: `LIB [!!]`
-- stale but still useful: `LIB [?]`
-- expired: `Unknown`
 
-This forces the player to reason about where the enemy might have moved after the last confirmed sighting.
+```text
+LIB [!!]   current confirmed signal
+LIB [?]    stale signal
+Unknown    expired signal
+```
 
-## Weighted Enemy Movement
-Enemy movement is hidden from the player and uses graph distance to the office.
+---
 
-Each turn, the enemy chooses among legal neighboring rooms using:
-- rooms that move closer to the office
-- rooms that keep the same distance
-- random valid neighbors
+### Gate Control
 
-### Movement Probabilities
-#### Easy
-- closer: `50%`
-- sideways: `30%`
-- random: `20%`
+The player can close gates near `MB` to block the enemy.
 
-#### Normal
-- closer: `65%`
-- sideways: `25%`
-- random: `10%`
+- Gates are toggled using the cursor and `G`.
+- Closing a gate costs energy.
+- Opening a gate costs `0%` energy but still uses a turn.
+- Closed gates drain upkeep every turn, including wait turns.
+- There is no command to close multiple gates at once.
 
-#### Hard
-- closer: `70%`
-- sideways: `20%`
-- random: `10%`
+---
 
-This makes the enemy feel like it is stalking the player instead of wandering aimlessly, while still allowing some unpredictability on Easy and Normal.
+### Energy System
 
-## Lure Behavior
-- Lure: place a distraction at the selected building. If the enemy is nearby, it may move toward the lure instead of the office.
-- The effect is probabilistic, not guaranteed.
-- After normal office-seeking weights are assigned, moves that get closer to the lure receive an extra multiplier.
+Energy is the main resource. The player loses if energy reaches `0%`.
 
-### Lure Tuning by Difficulty
-#### Easy
-- cost: `2%`
-- cooldown: `3` turns
-- duration: `3` turns
-- lure weight multiplier: `2.5x`
+| Action        |                 Easy |               Normal |                 Hard |
+| ------------- | -------------------: | -------------------: | -------------------: |
+| Quick Sweep   |                 `1%` |                 `2%` |                 `1%` |
+| Deep Scan     |                 `2%` |                 `4%` |                 `5%` |
+| Gate Close    |                 `2%` |                 `2%` |                 `2%` |
+| Door Upkeep   | `1%` per closed gate | `1%` per closed gate | `1%` per closed gate |
+| Lure          |                 `2%` |                 `4%` |                 `3%` |
+| Wait / Listen |                 `0%` |                 `0%` |                 `0%` |
 
-#### Normal
-- cost: `4%`
-- cooldown: `4` turns
-- duration: `3` turns
-- lure weight multiplier: `2.75x`
+`Wait / Listen` is free as an action, but the turn still advances, the enemy still moves, and closed gates still drain upkeep.
 
-#### Hard
-- cost: `4%`
-- cooldown: `4` turns
-- duration: `2` turns
-- lure weight multiplier: `3.0x`
+Hard mode keeps Quick Sweep cheap because Hard has a larger map, weaker audio hints, and more expensive Deep Scan. This encourages broad but uncertain scanning while making exact confirmation costly.
 
-## Difficulty Identity
-### Easy
-- cheaper scans
-- longer signal decay
-- clearer audio hints
-- more forgiving movement pattern
+---
 
-### Normal
-- intended balanced mode
-- useful but limited audio support
-- short-lived signal memory
+### Audio Hints
 
-### Hard
-- expensive scans
-- weak audio support
-- almost no stale signal memory
-- strongly office-seeking enemy
-- 12 active-building Trident map: Skyline opens into West, Center, and East lanes, with `HOC` as the main mid-map transfer hub
-- `MB` is reachable through three gate rooms: `KAD`, `LIB`, and `KNOW`
+Audio hints are random but truthful. If a hint appears, it is based on the enemy's real distance from `MB` after the enemy moves.
 
-## Save / Load
-- The game saves to `camerawatch_save.txt`
-- ASCII maps are loaded from:
-  - `maps/map_easy.txt`
-  - `maps/map_normal.txt`
-  - `maps/map_hard.txt`
+No audio hint is generated if the enemy is 4 or more steps away.
+
+| Distance from `MB` |  Easy | Normal |  Hard |
+| ------------------ | ----: | -----: | ----: |
+| 3 steps away       | `25%` |  `20%` | `10%` |
+| 2 steps away       | `40%` |  `35%` | `25%` |
+| 1 step away        | `65%` |  `60%` | `45%` |
+
+Audio supports deduction but does not replace cameras.
+
+---
+
+### Enemy Movement
+
+Enemy movement is hidden from the player. Each turn, the enemy chooses among legal neighboring rooms using weighted randomness.
+
+| Movement Type       |  Easy | Normal |  Hard |
+| ------------------- | ----: | -----: | ----: |
+| Move closer to `MB` | `50%` |  `65%` | `70%` |
+| Move sideways       | `30%` |  `25%` | `20%` |
+| Random valid move   | `20%` |  `10%` | `10%` |
+
+This makes the enemy usually move toward `MB`, while still keeping movement unpredictable.
+
+---
+
+### Lure
+
+The player can place a lure at the selected building.
+
+While a lure is active, any legal enemy move that gets closer to the lure receives an extra weight multiplier. The lure does not force movement; it only biases the enemy's weighted choice.
+
+| Difficulty | Cost |  Cooldown |  Duration | Multiplier |
+| ---------- | ---: | --------: | --------: | ---------: |
+| Easy       | `2%` | `3` turns | `3` turns |     `2.5x` |
+| Normal     | `4%` | `4` turns | `3` turns |    `2.75x` |
+| Hard       | `3%` | `4` turns | `2` turns |     `3.0x` |
+
+---
+
+## Difficulty Levels
+
+Protocol 1911 has three difficulty levels with meaningful gameplay differences.
+
+| Difficulty | Main Characteristics                                                                                                                                              |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Easy       | Smaller map, cheaper scans, longer signal memory, clearer audio hints, and more forgiving enemy movement.                                                         |
+| Normal     | Balanced scan costs, moderate audio support, short signal memory, and medium enemy aggression.                                                                    |
+| Hard       | Larger Trident-style map, expensive Deep Scan, weaker audio support, shorter lure duration, stronger enemy movement toward `MB`, and three gate routes into `MB`. |
+
+---
+
+## Save and Load
+
+The game saves to:
+
+```text
+protocol1911_save.txt
+```
+
+ASCII maps are loaded from:
+
+```text
+maps/map_easy.txt
+maps/map_normal.txt
+maps/map_hard.txt
+```
+
+Save/load behavior:
+
+- Press `Q` during gameplay to save and return to the menu.
+- Use `Load Game` from the main menu to resume.
+- Corrupted or incompatible save files are rejected where possible.
+- If a map template is missing, the game displays a fallback warning instead of crashing.
+
+---
+
+## Code Structure
+
+```text
+main.cpp
+- Program entry point
+- Menu flow
+- Main game loop
+- Keyboard action dispatch
+
+game.cpp / game.h
+- GameState structure
+- Turn system
+- Energy system
+- Win/loss checks
+- Scan, gate, lure, and difficulty logic
+
+enemy.cpp / enemy.h
+- Enemy state
+- Weighted random movement
+- Lure response
+
+map.cpp / map.h
+- Campus graph construction
+- Room list
+- Camera cluster definitions
+- Spawn-room selection
+
+graph_algos.cpp / graph_algos.h
+- BFS shortest paths
+- Distance maps
+- Graph analysis helpers
+- Probability diffusion
+
+save_load.cpp / save_load.h
+- Save file writing
+- Save file loading
+- Save data validation
+
+ui.cpp / ui.h
+- ncurses terminal interface
+- Menus
+- HUD
+- ASCII map rendering
+- Help screen
+- End screens
+
+terminal.cpp / terminal.h
+- Raw terminal input
+- Key parsing
+- Terminal restoration
+```
+
+---
 
 ## COMP2113 Requirement Relevance
-### Random Events
-- audio hint probability is random but truthful
-- enemy movement uses weighted random choice
-- enemy spawn is chosen from rooms far from the office
 
-### Data Structures
-- the campus is stored as a graph using rooms and adjacency lists
-- camera clusters are represented through room-group membership
-- signal memory uses room/turn state
-- probability analysis uses maps and vectors
+### 1. Random Events
 
-### Dynamic Memory
-- STL containers such as `std::vector` and `std::map` dynamically manage:
-  - rooms
-  - adjacency lists
-  - scan output
-  - probability state
-  - event log
+The game includes meaningful randomness:
 
-### File I/O
-- save/load uses plain-text file serialization
-- map templates are read from external text files
+- random enemy spawn from far rooms,
+- weighted random enemy movement,
+- probabilistic audio hints,
+- probabilistic lure influence.
 
-### Multiple Files
-- logic is split across `main`, `game`, `enemy`, `map`, `graph_algos`, `ui`, `terminal`, and `save_load`
+These random events affect gameplay and replayability.
 
-### Multiple Difficulty Levels
-- Easy, Normal, and Hard each change:
-  - map size
-  - scan costs
-  - signal decay
-  - audio hint probability
-  - lure cooldown
-  - enemy movement behavior
+---
+
+### 2. Data Structures
+
+The project uses data structures to manage the game state:
+
+- the campus is stored as a graph using rooms and adjacency lists,
+- camera clusters are stored as room groups,
+- signal memory stores room and turn information,
+- game state tracks energy, difficulty, gates, lures, and enemy state,
+- event logs store recent messages,
+- probability analysis uses maps and vectors.
+
+Important STL containers include:
+
+- `std::vector`
+- `std::map`
+- `std::string`
+
+---
+
+### 3. Dynamic Memory Management
+
+The project uses STL containers such as `std::vector`, `std::map`, and `std::string`.
+
+These containers dynamically manage memory for rooms, adjacency lists, camera clusters, scan output, probability state, event logs, and save/load data.
+
+No raw `new` or `delete` is required.
+
+---
+
+### 4. File Input / Output
+
+The project uses file I/O for:
+
+- loading ASCII map templates from the `maps/` folder,
+- saving game state to `protocol1911_save.txt`,
+- loading previous game state,
+- rejecting invalid save data where possible.
+
+---
+
+### 5. Program Codes in Multiple Files
+
+The project is split into multiple `.cpp` and `.h` files for game logic, enemy movement, map construction, graph algorithms, UI, terminal input, and save/load.
+
+---
+
+### 6. Multiple Difficulty Levels
+
+Easy, Normal, and Hard affect:
+
+- map size,
+- scan costs,
+- signal decay,
+- audio hint probability,
+- lure cooldown and duration,
+- enemy movement behavior,
+- gate layout,
+- overall pressure on the player.
+
+Difficulty levels therefore change actual gameplay, not only labels.
+
+---
+
+## Known Limitations
+
+- The game is designed for a terminal of at least `58 x 22`; smaller terminals show a size warning.
+- The UI depends on Linux terminal behavior and `ncurses`, so the intended grading environment is the HKU CS Linux / academy server over terminal or SSH.
+- Save files are plain text for readability. Invalid edited values are rejected where possible.
+- The game tracks one active enemy entity.
