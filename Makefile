@@ -1,7 +1,7 @@
 CXX := g++
 CXXFLAGS := -std=c++11 -Wall -Wextra -pedantic
 LDLIBS := -lncurses
-TARGET := camerawatch
+TARGET := protocol1911
 SOURCES := main.cpp game.cpp enemy.cpp graph_algos.cpp map.cpp save_load.cpp ui.cpp terminal.cpp
 OBJECTS := $(SOURCES:.cpp=.o)
 
@@ -19,4 +19,4 @@ run: $(TARGET)
 	./$(TARGET)
 
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(OBJECTS) $(TARGET) camerawatch

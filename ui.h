@@ -41,12 +41,6 @@ void drawGame(const GameState &gs, int cursorRoom);
 // Draw the game HUD with an in-panel Quick Sweep cluster picker.
 void drawSweepSelection(const GameState &gs, int cursorRoom, int selectedGroup);
 
-// Draw the main menu.
-void drawMainMenu();
-
-// Draw difficulty selection.
-void drawDifficultyMenu();
-
 // Draw the spatial ASCII map.
 void drawMap(const GameState &gs, int cursorRoom);
 
@@ -55,9 +49,6 @@ void drawCameraFeed(const GameState &gs);
 
 // Draw end game screen.
 void drawEndGame(const GameState &gs);
-
-// Prompt for an integer in range [lo, hi]. Returns -1 on failure.
-int promptInt(const std::string &msg, int lo, int hi);
 
 // Display a message and wait for enter.
 void pause(const std::string &msg);

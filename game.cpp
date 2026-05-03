@@ -13,7 +13,6 @@ static std::string toLowerCopy(const std::string &text) {
 }
 
 static int primaryClusterForRoom(const GameMap &map, int roomId);
-static bool clusterContainsOfficeGate(const GameMap &map, int group);
 static bool isOfficeGateRoom(const GameState &gs, int roomId);
 static std::string officeEntryGateMessage(const GameState &gs);
 static bool hasGraphEdge(const GameMap &map, int a, int b);
@@ -59,12 +58,6 @@ static int primaryClusterForRoom(const GameMap &map, int roomId) {
             return group;
     }
     return -1;
-}
-
-static bool clusterContainsOfficeGate(const GameMap &map, int group) {
-    return roomInCameraGroup(map, 3, group) ||
-           roomInCameraGroup(map, 4, group) ||
-           (hasGraphEdge(map, 2, map.officeId) && roomInCameraGroup(map, 2, group));
 }
 
 static bool isOfficeGateRoom(const GameState &gs, int roomId) {
@@ -423,12 +416,8 @@ void GameState::quickSweep(int group) {
 
     lastScanOutput.push_back("QUICK SWEEP - " + label);
     if (movementDetected) {
-        lastScanOutput.push_back(clusterContainsOfficeGate(gameMap, group)
-            ? "Movement detected near the office gates."
-            : "Movement detected in " + label + ".");
-        eventLog.push_back(clusterContainsOfficeGate(gameMap, group)
-            ? "Quick Sweep detected movement near the office gates."
-            : "Quick Sweep detected movement in " + label + ".");
+        lastScanOutput.push_back("Movement detected in " + label + ".");
+        eventLog.push_back("Quick Sweep detected movement in " + label + ".");
     } else {
         lastScanOutput.push_back("No movement detected in " + label + ".");
         eventLog.push_back("Quick Sweep found no movement in " + label + ".");

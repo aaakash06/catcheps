@@ -198,12 +198,6 @@ static void waitForEnterInput() {
     std::cin.get();
 }
 
-static void drawTextBlock(int startY, int width, const std::vector<std::string> &lines) {
-    int marginX = getCenterX(width);
-    for (size_t i = 0; i < lines.size(); i++)
-        printAt(startY + static_cast<int>(i), marginX, lines[i]);
-}
-
 void clearScreen() {
     if (cursesActive) {
         clear();
@@ -492,7 +486,7 @@ void showStoryline() {
         "HKU MAINFRAME [Version 4.2.1]",
         "LOGIN SUCCESSFUL.",
         "USER: STUDENT_ADMIN",
-        "LOCATION: MAIN BUILDING (MB) - SUB-LEVEL 2"
+        "LOCATION: MAIN BUILDING (MB)"
     };
     const std::vector<std::string> redLines = {
         "WARNING: CAMPUS WIDE POWER FAILURE DETECTED.",
@@ -501,12 +495,12 @@ void showStoryline() {
     };
     const std::vector<std::string> whiteLines = {
         "You are trapped in the Main Building (MB) Server Room.",
-        "Dangerous intruders have breached the campus perimeter.",
+        "Dangerous intruders have sneaked into the campus.",
         "They are hunting for you, moving room-by-room across the campus.",
         "Main power is dead. You are surviving on a backup battery.",
         "You must use this terminal to track the intruders using security cameras.",
         "You can close blast doors to block their path, but keeping them closed drains your battery fast.",
-        "You may use Audio Lures to trick the intruders into another hallway.",
+        "You can use Audio Lure to trick them into another hallway.",
         "Do not let your battery hit 0%.",
         "Do not let the intruders reach the Main Building.",
         "Survive until dawn."
@@ -1250,7 +1244,7 @@ static void drawCompactGameInternal(const GameState &gs, int cursorRoom, bool se
     const int innerWidth = compactWidth - 2;
     int y = 1;
     std::stringstream header;
-    header << CLR_BOLD << "CAMERA WATCH"
+    header << CLR_BOLD << "PROTOCOL 1911"
            << CLR_RESET << "  Night " << gs.currentNight << "/" << gs.totalNights
            << "  Turn " << gs.turn << "/" << gs.maxTurns;
     printWindowCenteredInBox(gameWin, compactHeight, compactWidth, y++, header.str());
@@ -1398,7 +1392,7 @@ static void drawGameInternal(const GameState &gs, int cursorRoom, bool selecting
 
     int y = 1;
     std::stringstream header;
-    header << CLR_BOLD << "CAMERA WATCH - HKU CAMPUS"
+    header << CLR_BOLD << "PROTOCOL 1911 - HKU CAMPUS"
            << " | NIGHT " << gs.currentNight << "/" << gs.totalNights
            << " | TURN " << gs.turn << "/" << gs.maxTurns << CLR_RESET;
     printWindowCentered(gameWin, y++, header.str());
@@ -1537,50 +1531,6 @@ void drawSweepSelection(const GameState &gs, int cursorRoom, int selectedGroup) 
     drawGameInternal(gs, cursorRoom, true, selectedGroup);
 }
 
-void drawMainMenu() {
-    clearScreen();
-    const std::string logo =
-        std::string(CLR_BOLD CLR_CYAN) +
-        "============================================================\n"
-        "       C A M E R A   W A T C H  -  H K U   C A M P U S\n"
-        "============================================================" +
-        CLR_RESET;
-    int startY = getCenterY(17);
-    drawCenteredArt(startY, logo);
-
-    std::vector<std::string> story = {
-        "You are a night security guard at the University of Hong Kong.",
-        "An intruder stalks through the campus buildings.",
-        "Monitor cameras, use sound lures, close doors,",
-        "and survive until 6 AM each night."
-    };
-    drawTextBlock(startY + 5, 62, story);
-
-    printCentered(startY + 11, std::string(CLR_BOLD CLR_CYAN) + "[1]" + CLR_RESET CLR_BOLD + " New Game");
-    printCentered(startY + 12, std::string(CLR_BOLD CLR_CYAN) + "[2]" + CLR_RESET CLR_BOLD + " Load Game");
-    printCentered(startY + 13, std::string(CLR_BOLD CLR_CYAN) + "[3]" + CLR_RESET CLR_BOLD + " How to Play");
-    printCentered(startY + 14, std::string(CLR_BOLD CLR_CYAN) + "[0]" + CLR_RESET CLR_BOLD + " Quit" + CLR_RESET);
-    printCentered(startY + 16, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
-    std::cout.flush();
-}
-
-void drawDifficultyMenu() {
-    clearScreen();
-    int startY = getCenterY(9);
-    printCentered(startY, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
-    printCentered(startY + 1, std::string(CLR_BOLD) + "SELECT DIFFICULTY" + CLR_RESET);
-    printCentered(startY + 2, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
-
-    std::vector<std::string> options = {
-        std::string(CLR_CYAN) + "[1]" + CLR_RESET + " " + CLR_BOLD + "Easy" + CLR_RESET + "   - 8 buildings, 2 nights, forgiving scans",
-        std::string(CLR_CYAN) + "[2]" + CLR_RESET + " " + CLR_BOLD + "Normal" + CLR_RESET + " - 10 buildings, 2 nights, balanced routes",
-        std::string(CLR_CYAN) + "[3]" + CLR_RESET + " " + CLR_BOLD + "Hard" + CLR_RESET + "   - 12 active buildings, 2 nights, three gates"
-    };
-    drawTextBlock(startY + 5, 64, options);
-    printCentered(startY + 8, std::string(CLR_BOLD CLR_CYAN) + "============================================================" + CLR_RESET);
-    std::cout.flush();
-}
-
 void drawEndGame(const GameState &gs) {
     clear();
     syncTerminalSize();
@@ -1641,24 +1591,6 @@ void drawHelp() {
     mvaddCenteredCurses(terminalRows - 2, "Press Enter to go back...", BOOT_WHITE);
     refresh();
     waitForEnterInput();
-}
-
-int promptInt(const std::string &msg, int lo, int hi) {
-    int val;
-    syncTerminalSize();
-    std::string prompt = trimLeft(msg);
-    int promptY = std::min(std::max(0, terminalRows - 3), getCenterY(1) + 12);
-    printAt(promptY, getCenterX(visibleLength(prompt) + 2), prompt);
-    std::cout.flush();
-    std::cin >> val;
-    if (std::cin.fail() || val < lo || val > hi) {
-        std::cin.clear();
-        std::cin.ignore(10000, '\n');
-        return -1;
-    }
-    std::cin.ignore(10000, '\n');
-    moveCursorToBottom();
-    return val;
 }
 
 void pause(const std::string &msg) {

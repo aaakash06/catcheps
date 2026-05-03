@@ -11,6 +11,6 @@ bool saveGame(const GameState &gs, const std::string &filename);
 bool loadGame(GameState &gs, const std::string &filename);
 
 // Default save filename.
-const std::string SAVE_FILE = "camerawatch_save.txt";
+const std::string SAVE_FILE = "protocol1911_save.txt";
 
 #endif

@@ -1,3 +1,8 @@
 *.o
 camerawatch_save.txt
+protocol1911_save.txt
 camerawatch
+protocol1911
+*.exe
+.DS_Store
+*.swp
